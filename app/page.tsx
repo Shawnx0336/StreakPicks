@@ -3349,121 +3349,18 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 // --- Whop Integration Wrapper ---
 
 export default function Page() {
-    // useWhop hook provides client-side authentication status
-    const { user, isAuthenticated, isLoading, hasAccess, error } = useWhop();
+    // Complete bypass - skip all auth logic
+    const mockUser = {
+        id: 'user_' + Date.now(),
+        username: 'TestPlayer' + Math.floor(Math.random() * 1000),
+        email: 'test@example.com',
+        name: 'Test Player'
+    };
 
-    if (isLoading) {
-        return (
-            <div className="min-h-screen bg-bg-primary text-text-primary flex flex-col items-center justify-center p-4">
-                <style>{`
-                    @keyframes spin {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                    }
-                    .loader {
-                        border-top-color: var(--accent-info);
-                        animation: spin 1.2s linear infinite;
-                    }
-                    /* Base theme for loading state */
-                    :root {
-                        --bg-primary: #ffffff;
-                        --text-primary: #1e293b;
-                        --text-secondary: #64748b;
-                        --accent-info: #3b82f6;
-                    }
-                    .dark {
-                        --bg-primary: #0a0a0a;
-                        --text-primary: #ffffff;
-                        --text-secondary: #a0a0a0;
-                    }
-                `}</style>
-                <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mb-4"></div>
-                <h2 className="text-xl font-bold mb-2">Connecting to Whop...</h2>
-                <p className="text-text-secondary">Verifying your authentication and access</p>
-            </div>
-        );
-    }
-
-    if (error || !isAuthenticated || !hasAccess) {
-        return (
-            <div className="min-h-screen bg-bg-primary text-text-primary flex flex-col items-center justify-center p-4">
-                <style>{`
-                    @keyframes spin {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                    }
-                    .whop-logo {
-                        font-size: 4rem;
-                        margin-bottom: 1rem;
-                        filter: drop-shadow(0 4px 12px rgba(59, 130, 246, 0.3));
-                    }
-                    /* Base theme for login/error state */
-                    :root {
-                        --bg-primary: #ffffff;
-                        --text-primary: #1e293b;
-                        --text-secondary: #64748b;
-                    }
-                    .dark {
-                        --bg-primary: #0a0a0a;
-                        --text-primary: #ffffff;
-                        --text-secondary: #a0a0a0;
-                    }
-                `}</style>
-
-                <div className="whop-logo">🔐</div>
-                <h2 className="text-3xl font-bold text-text-primary mb-4 text-center">
-                    Welcome to Streak Pick'em
-                </h2>
-
-                {error ? (
-                    <>
-                        <div className="text-red-500 text-lg mb-4">⚠️ Authentication Error</div>
-                        <p className="text-center text-text-secondary mb-6 max-w-md">
-                            {error.message || "Something went wrong during authentication. Please try again."}
-                        </p>
-                    </>
-                ) : (
-                    <>
-                        <p className="text-center text-lg text-text-secondary mb-6 max-w-md">
-                            Connect your Whop account to start building your streak and compete with other players!
-                        </p>
-                    </>
-                )}
-
-                <div className="space-y-4">
-                    <a
-                        href="/api/oauth/init"
-                        className="inline-flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-full transition-all duration-200 transform hover:scale-105 shadow-lg"
-                    >
-                        <span className="text-xl">🏆</span>
-                        <span>Login with Whop</span>
-                    </a>
-
-                    {error && (
-                        <button
-                            onClick={() => window.location.reload()}
-                            className="block w-full text-center text-text-secondary hover:text-text-primary transition-colors"
-                        >
-                            Try Again
-                        </button>
-                    )}
-                </div>
-
-                <div className="mt-8 text-center">
-                    <p className="text-text-secondary text-sm mb-2">🎯 Predict sports games daily</p>
-                    <p className="text-text-secondary text-sm mb-2">🔥 Build epic winning streaks</p>
-                    <p className="text-text-secondary text-sm">🏆 Compete on global leaderboards</p>
-                </div>
-            </div>
-        );
-    }
-
-    // If authenticated and has access, render the main App component
+    // Directly render the app without any auth checks
     return (
-        <ErrorBoundaryComponent fallback={<ErrorDisplay message="Something went wrong with the application." />}>
-            <div className="whop-page-wrapper">
-                <App user={user} />
-            </div>
-        </ErrorBoundaryComponent>
+        <div className="whop-page-wrapper">
+            <App user={mockUser} />
+        </div>
     );
 }
