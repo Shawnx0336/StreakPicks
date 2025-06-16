@@ -289,33 +289,47 @@ const validateMatchupData = (matchup) => {
 
 // === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
 const universalDateParser = (dateInput) => {
-    if (!dateInput) return null;
+    if (!dateInput) {
+        console.log('universalDateParser: No input provided');
+        return null;
+    }
+    
+    console.log('universalDateParser input:', dateInput, 'type:', typeof dateInput);
     
     // If it's already a Date object
     if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
+        const isValid = !isNaN(dateInput.getTime());
+        console.log('universalDateParser: Date object, valid:', isValid);
+        return isValid ? dateInput : null;
     }
     
     // If it's a timestamp
     if (typeof dateInput === 'number') {
         const date = new Date(dateInput);
-        return isNaN(date.getTime()) ? null : date;
+        const isValid = !isNaN(date.getTime());
+        console.log('universalDateParser: Number input, valid:', isValid);
+        return isValid ? date : null;
     }
     
     // If it's a string, try multiple parsing strategies
     const dateString = dateInput.toString().trim();
+    console.log('universalDateParser: Processing string:', dateString);
     
     // Strategy 1: Direct parsing (works on most browsers)
     let date = new Date(dateString);
     if (!isNaN(date.getTime())) {
+        console.log('universalDateParser: Strategy 1 (direct) succeeded');
         return date;
     }
     
     // Strategy 2: Fix common iOS Safari issues
+    // Replace space with T for ISO format
     if (dateString.includes(' ') && !dateString.includes('T')) {
         const isoFixed = dateString.replace(' ', 'T');
+        console.log('universalDateParser: Trying ISO fix:', isoFixed);
         date = new Date(isoFixed);
         if (!isNaN(date.getTime())) {
+            console.log('universalDateParser: Strategy 2 (ISO fix) succeeded');
             return date;
         }
     }
@@ -323,6 +337,7 @@ const universalDateParser = (dateInput) => {
     // Strategy 3: Parse ISO-like strings manually
     const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(?:Z|([+-]\d{2}):?(\d{2}))?$/);
     if (isoMatch) {
+        console.log('universalDateParser: Trying manual ISO parsing');
         const [, year, month, day, hour, minute, second, ms = '0', tzHour = '0', tzMin = '0'] = isoMatch;
         
         const utcDate = new Date(Date.UTC(
@@ -339,6 +354,7 @@ const universalDateParser = (dateInput) => {
         const finalDate = new Date(utcDate.getTime() - tzOffset);
         
         if (!isNaN(finalDate.getTime())) {
+            console.log('universalDateParser: Strategy 3 (manual ISO) succeeded');
             return finalDate;
         }
     }
@@ -352,13 +368,15 @@ const universalDateParser = (dateInput) => {
     ];
     
     for (const attempt of parseAttempts) {
+        console.log('universalDateParser: Trying parse attempt:', attempt);
         const timestamp = Date.parse(attempt);
         if (!isNaN(timestamp)) {
+            console.log('universalDateParser: Strategy 4 (Date.parse) succeeded with:', attempt);
             return new Date(timestamp);
         }
     }
     
-    console.error('Could not parse date:', dateString);
+    console.error('universalDateParser: All strategies failed for:', dateString);
     return null;
 };
 
@@ -1111,6 +1129,48 @@ const parseESPNGameData = (event, sport) => {
 
         const sportEmoji = getSportEmoji(sport);
 
+        // 🔥 FIXED: Add validation for the parsed date
+        console.log('Raw event.date from ESPN:', event.date); // Debug log
+        
+        const gameStartTime = universalDateParser(event.date);
+        if (!gameStartTime) {
+            console.error('universalDateParser failed for:', event.date);
+            // Fallback: try basic new Date() as last resort
+            const fallbackDate = new Date(event.date);
+            if (!isNaN(fallbackDate.getTime())) {
+                console.log('Fallback new Date() worked');
+                return {
+                    id: event.id,
+                    homeTeam: {
+                        name: homeTeamRaw.team.displayName || homeTeamRaw.team.name,
+                        abbr: homeTeamRaw.team.abbreviation,
+                        logo: sportEmoji,
+                        colors: [
+                            (homeTeamRaw.team.color || '505050'),
+                            (homeTeamRaw.team.alternateColor || '808080')
+                        ]
+                    },
+                    awayTeam: {
+                        name: awayTeamRaw.team.displayName || awayTeamRaw.team.name,
+                        abbr: awayTeamRaw.team.abbreviation,
+                        logo: sportEmoji,
+                        colors: [
+                            (awayTeamRaw.team.color || '505050'),
+                            (awayTeamRaw.team.alternateColor || '808080')
+                        ]
+                    },
+                    sport: sport,
+                    venue: competition.venue?.fullName || `${sport} Stadium`,
+                    startTime: fallbackDate,
+                    status: event.status?.type?.detail || 'upcoming'
+                };
+            } else {
+                throw new Error(`Both universalDateParser and new Date() failed for: ${event.date}`);
+            }
+        }
+
+        console.log('universalDateParser succeeded:', gameStartTime); // Debug log
+
         return {
             id: event.id,
             homeTeam: {
@@ -1133,8 +1193,7 @@ const parseESPNGameData = (event, sport) => {
             },
             sport: sport,
             venue: competition.venue?.fullName || `${sport} Stadium`,
-            // === AND UPDATE parseESPNGameData TO USE IT ===
-            startTime: universalDateParser(event.date),
+            startTime: gameStartTime, // Now guaranteed to be valid
             status: event.status?.type?.detail || 'upcoming'
         };
 
