@@ -226,7 +226,7 @@ const getDisplayName = (user) => {
 };
 
 /**
- * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
+ * Generates a consistent date string ingetFullYear()-MM-DD format, suitable for comparisons.
  * This helps avoid timezone issues with toDateString().
  * @returns {string} Date string in 'YYYY-MM-DD' format.
  */
@@ -2341,18 +2341,35 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const [timeLeft, setTimeLeft] = useState('');
     const [gameStarted, setGameStarted] = useState(false);
 
-    // 3. ULTRA-SIMPLE GameTimeDisplay:
+    // ALSO ADD this enhanced GameTimeDisplay with better mobile error handling:
+
     const GameTimeDisplay = ({ startTime }) => {
+        console.log('🎮 GameTimeDisplay called with:', startTime, typeof startTime);
+        
         if (!startTime) {
-            return null;
+            console.log('❌ GameTimeDisplay: No startTime provided');
+            return (
+                <div className="text-center text-sm text-yellow-500 mb-2">
+                    <span className="font-medium">⏳ Loading game time...</span>
+                </div>
+            );
         }
 
         // startTime should already be a valid Date object from parseESPNGameData
-        if (!(startTime instanceof Date) || isNaN(startTime.getTime())) {
-            console.error('❌ GameTimeDisplay: Invalid startTime:', startTime);
+        if (!(startTime instanceof Date)) {
+            console.error('❌ GameTimeDisplay: startTime is not a Date object:', typeof startTime, startTime);
             return (
                 <div className="text-center text-sm text-red-500 mb-2">
-                    <span className="font-medium">Invalid time</span>
+                    <span className="font-medium">⚠️ Invalid time format</span>
+                </div>
+            );
+        }
+        
+        if (isNaN(startTime.getTime())) {
+            console.error('❌ GameTimeDisplay: Date object is invalid:', startTime);
+            return (
+                <div className="text-center text-sm text-red-500 mb-2">
+                    <span className="font-medium">⚠️ Invalid time value</span>
                 </div>
             );
         }
@@ -2368,6 +2385,8 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 timeZoneName: 'short'
             });
 
+            console.log('✅ GameTimeDisplay: Successfully formatted time:', displayTime);
+
             return (
                 <div className="text-center text-sm text-text-secondary mb-2 timer-text">
                     <span className="font-medium">{displayTime}</span>
@@ -2377,7 +2396,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
             console.error('❌ GameTimeDisplay formatting error:', error);
             return (
                 <div className="text-center text-sm text-text-secondary mb-2">
-                    <span className="font-medium">Display error</span>
+                    <span className="font-medium">⚠️ Display error</span>
                 </div>
             );
         }
@@ -2387,13 +2406,24 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     // 4. KEEP your existing timer useEffect - it should work fine now!
     // Your timer countdown was already working, so don't change that logic.
     useEffect(() => {
-        // Early validation
+        // === MOBILE DEBUG SECTION ===
+        console.log('🔍 MOBILE TIMER DEBUG:');
+        console.log('- todaysMatchup exists:', !!todaysMatchup);
+        console.log('- todaysMatchup.startTime exists:', !!todaysMatchup?.startTime);
+        console.log('- startTime value:', todaysMatchup?.startTime);
+        console.log('- startTime type:', typeof todaysMatchup?.startTime);
+        console.log('- Is mobile?', /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent));
+        console.log('- Current URL:', window.location.href);
+        console.log('- User agent:', navigator.userAgent);
+
+        // Early validation - ADD THIS CHECK
         if (!todaysMatchup || !todaysMatchup.startTime) {
-            console.warn('Timer: No matchup or startTime available');
-            setTimeLeft('Loading...');
-            return;
+            console.warn('❌ Timer: No matchup or startTime available');
+            setTimeLeft('⏳ Loading matchup...');
+            return; // Exit early - don't run timer
         }
 
+        console.log('✅ Timer: Matchup and startTime available, proceeding...');
         console.log('Timer: Raw startTime:', todaysMatchup.startTime);
         console.log('Timer: StartTime type:', typeof todaysMatchup.startTime);
 
@@ -2404,7 +2434,9 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         if (todaysMatchup.startTime instanceof Date) {
             if (!isNaN(todaysMatchup.startTime.getTime())) {
                 gameTime = todaysMatchup.startTime;
-                console.log('Timer: Using existing Date object');
+                console.log('✅ Timer: Using existing Date object');
+            } else {
+                console.log('❌ Timer: Date object is invalid');
             }
         }
 
@@ -2414,10 +2446,12 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 const basicDate = new Date(todaysMatchup.startTime);
                 if (!isNaN(basicDate.getTime())) {
                     gameTime = basicDate;
-                    console.log('Timer: Basic new Date() worked');
+                    console.log('✅ Timer: Basic new Date() worked');
+                } else {
+                    console.log('❌ Timer: Basic new Date() failed - invalid date');
                 }
             } catch (e) {
-                console.log('Timer: Basic new Date() failed:', e);
+                console.log('❌ Timer: Basic new Date() threw error:', e);
             }
         }
 
@@ -2427,23 +2461,42 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 const timestamp = Date.parse(todaysMatchup.startTime);
                 if (!isNaN(timestamp)) {
                     gameTime = new Date(timestamp);
-                    console.log('Timer: Date.parse() worked');
+                    console.log('✅ Timer: Date.parse() worked');
+                } else {
+                    console.log('❌ Timer: Date.parse() returned NaN');
                 }
             } catch (e) {
-                console.log('Timer: Date.parse() failed:', e);
+                console.log('❌ Timer: Date.parse() threw error:', e);
             }
         }
 
-        // Approach 4: Emergency fallback
-        if (!gameTime) {
-            console.error('Timer: All date parsing failed, using fallback');
-            // Create a game time 2 hours from now
-            gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-            setTimeLeft('Fallback time used');
+        // Approach 4: Try universalDateParser if available
+        if (!gameTime && typeof universalDateParser === 'function') {
+            try {
+                gameTime = universalDateParser(todaysMatchup.startTime);
+                if (gameTime) {
+                    console.log('✅ Timer: universalDateParser worked');
+                } else {
+                    console.log('❌ Timer: universalDateParser returned null');
+                }
+            } catch (e) {
+                console.log('❌ Timer: universalDateParser threw error:', e);
+            }
         }
 
-        console.log('Timer: Final gameTime:', gameTime);
+        // Approach 5: Emergency fallback
+        if (!gameTime) {
+            console.error('🚨 Timer: ALL date parsing failed, using fallback');
+            // Create a game time 2 hours from now
+            gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            setTimeLeft('🚨 Fallback time used');
+        }
 
+        console.log('🎯 Timer: Final gameTime:', gameTime);
+        console.log('🎯 Timer: Final gameTime ISO:', gameTime.toISOString());
+        console.log('🎯 Timer: Time until game (minutes):', Math.round((gameTime.getTime() - Date.now()) / (1000 * 60)));
+
+        // Rest of your timer logic...
         let animationFrame;
         let lastUpdate = 0;
         let isComponentMounted = true;
@@ -2459,8 +2512,8 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     
                     // Validate timestamps
                     if (isNaN(now) || isNaN(gameTimeMs)) {
-                        console.error('Timer: Invalid timestamps', { now, gameTimeMs });
-                        setTimeLeft('Timer error');
+                        console.error('❌ Timer: Invalid timestamps', { now, gameTimeMs });
+                        setTimeLeft('⚠️ Timer error');
                         return;
                     }
 
@@ -2468,7 +2521,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
                     if (distance < 0) {
                         setGameStarted(true);
-                        setTimeLeft('Game Started!');
+                        setTimeLeft('🔴 Game Started!');
                         return;
                     }
 
@@ -2480,8 +2533,8 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
                     // Validate calculations
                     if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
-                        console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
-                        setTimeLeft('Calculation error');
+                        console.error('❌ Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
+                        setTimeLeft('⚠️ Calculation error');
                         return;
                     }
 
@@ -2500,9 +2553,14 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     setTimeLeft(timeString);
                     lastUpdate = timestamp;
 
+                    // MOBILE DEBUG: Log every 10 seconds
+                    if (Math.floor(timestamp / 10000) !== Math.floor(lastUpdate / 10000)) {
+                        console.log('📱 Mobile timer update:', timeString, 'Distance:', Math.round(distance / 1000 / 60), 'min');
+                    }
+
                 } catch (error) {
-                    console.error('Timer calculation error:', error);
-                    setTimeLeft('Timer error');
+                    console.error('❌ Timer calculation error:', error);
+                    setTimeLeft('⚠️ Timer error');
                     return;
                 }
             }
@@ -2534,6 +2592,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 cancelAnimationFrame(animationFrame);
             }
             document.removeEventListener('visibilitychange', handleVisibilityChange);
+            console.log('🧹 Timer cleanup completed');
         };
     }, [todaysMatchup?.startTime]); // Depend on startTime specifically
 
@@ -2548,10 +2607,26 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
      */
     const fetchGameResult = async (gameId, sport) => {
         try {
-            // Get current date for API call to ensure we fetch the correct day's scoreboard
-            const currentDate = new Date();
-            const apiUrl = getSportEndpoint(sport, currentDate); // Pass currentDate here
-            const response = await fetch(apiUrl);
+            const sportLeagueMap = {
+                'MLB': 'baseball/mlb',
+                'NBA': 'basketball/nba',
+                'NFL': 'football/nfl',
+                'NHL': 'hockey/nhl',
+                'Soccer': 'soccer/fifa.world', // Example for soccer (might need real endpoint)
+                'NCAAB': 'basketball/mens-college-basketball' // Example for college hoops (might need real endpoint)
+            };
+
+            const leaguePath = sportLeagueMap[sport];
+            if (!leaguePath) {
+                console.warn(`Unsupported sport for direct game result: ${sport}`);
+                return null; // Fallback to other method
+            }
+
+            const gameUrl = `https://site.api.espn.com/apis/site/v2/sports/${leaguePath}/summary?event=${gameId}`;
+
+            console.log(`Fetching game result from: ${gameUrl}`);
+
+            const response = await fetch(gameUrl);
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -2559,43 +2634,39 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
             const data = await response.json();
 
-            // Find the specific game by ID
-            const game = data.events?.find(event => event.id === gameId);
+            // Check if game is completed
+            const header = data.header;
+            const competition = header?.competitions?.[0]; // Access first competition
 
-            if (!game) {
-                console.log(`Game ${gameId} not found in current API response (scoreboard)`);
-                return null;
+            if (!competition) {
+                throw new Error('No competition data found in summary');
             }
 
-            // Check if game is completed
-            const gameStatus = game.status?.type?.state;
+            const gameStatus = competition.status?.type?.state;
             if (gameStatus !== 'post') {
                 console.log(`Game ${gameId} not finished yet. Status: ${gameStatus}`);
                 return null;
             }
 
-            // Extract the final scores
-            const competition = game.competitions[0];
+            // Extract scores from competition data
             const competitors = competition.competitors;
+            const homeTeam = competitors.find(c => c.homeAway === 'home');
+            const awayTeam = competitors.find(c => c.homeAway === 'away');
 
-            const homeTeamResult = competitors.find(c => c.homeAway === 'home');
-            const awayTeamResult = competitors.find(c => c.homeAway === 'away');
-
-            if (!homeTeamResult || !awayTeamResult) {
-                throw new Error('Could not find home/away team data in completed game (scoreboard)');
+            if (!homeTeam || !awayTeam || !homeTeam.team || !awayTeam.team) {
+                throw new Error('Could not find complete home/away team data in summary');
             }
 
-            const homeScore = parseInt(homeTeamResult.score || 0);
-            const awayScore = parseInt(awayTeamResult.score || 0);
+            const homeScore = parseInt(homeTeam.score || 0); // Ensure score is parsed as int
+            const awayScore = parseInt(awayTeam.score || 0);
 
-            // Determine winner
             let winner = null;
             if (homeScore > awayScore) {
                 winner = 'home';
             } else if (awayScore > homeScore) {
                 winner = 'away';
             } else {
-                winner = 'tie'; // Handle ties (rare in most sports)
+                winner = 'tie';
             }
 
             return {
@@ -2605,17 +2676,17 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 awayScore: awayScore,
                 winner: winner,
                 homeTeam: {
-                    name: homeTeamResult.team.displayName || homeTeamResult.team.name,
-                    abbreviation: homeTeamResult.team.abbreviation,
+                    name: homeTeam.team.displayName,
+                    abbreviation: homeTeam.team.abbreviation,
                     score: homeScore
                 },
                 awayTeam: {
-                    name: awayTeamResult.team.displayName || awayTeamResult.team.name,
-                    abbreviation: awayTeamResult.team.abbreviation,
+                    name: awayTeam.team.displayName,
+                    abbreviation: awayTeam.team.abbreviation,
                     score: awayScore
                 },
-                completedAt: new Date(game.status?.type?.detail || new Date()),
-                rawGameData: game // Keep for debugging
+                completedAt: new Date(data.header.lastModified || Date.now()), // Use lastModified or current time
+                rawGameData: data
             };
 
         } catch (error) {
