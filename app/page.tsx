@@ -287,151 +287,55 @@ const validateMatchupData = (matchup) => {
 
 // === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
 const universalDateParser = (dateInput) => {
-    if (!dateInput) {
-        console.log('universalDateParser: No input provided');
-        return null;
-    }
+    if (!dateInput) return null;
     
-    console.log('universalDateParser input:', dateInput, 'type:', typeof dateInput);
-    console.log('User agent:', navigator.userAgent);
+    // FORCE DESKTOP BEHAVIOR - ignore mobile differences
+    console.log('🔧 FORCING desktop behavior for:', dateInput);
     
-    // Detect mobile browsers
-    const isMobile = /iPhone|iPad|iPod|Android|Mobile|Safari/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    
-    console.log('Device type:', { isMobile, isIOS });
-    
-    // If it's already a Date object
+    // If it's already a Date object, return it
     if (dateInput instanceof Date) {
-        const isValid = !isNaN(dateInput.getTime());
-        console.log('universalDateParser: Date object, valid:', isValid);
-        return isValid ? dateInput : null;
+        return isNaN(dateInput.getTime()) ? null : dateInput;
     }
     
-    // If it's a timestamp
-    if (typeof dateInput === 'number') {
-        const date = new Date(dateInput);
-        const isValid = !isNaN(date.getTime());
-        console.log('universalDateParser: Number input, valid:', isValid);
-        return isValid ? date : null;
-    }
+    // Convert to string and clean it
+    let dateString = String(dateInput).trim();
     
-    const dateString = dateInput.toString().trim();
-    console.log('universalDateParser: Processing string:', dateString);
-    
-    // MOBILE-SPECIFIC FIXES
-    if (isMobile) {
-        console.log('🔧 Applying mobile-specific date parsing...');
-        
-        // Mobile Strategy 1: Force ISO format for mobile browsers
-        if (dateString.includes(' ') && !dateString.includes('T')) {
-            // ESPN format: "2024-06-16 19:35:00" 
-            // Mobile needs: "2024-06-16T19:35:00"
-            let mobileISOFormat = dateString.replace(' ', 'T');
-            
-            // Mobile browsers are very strict about timezone info
-            if (!mobileISOFormat.includes('Z') && !mobileISOFormat.includes('+') && !mobileISOFormat.includes('-', 10)) {
-                // For mobile, we need to be explicit about timezone
-                // Try these in order of likelihood:
-                const mobileTimezoneAttempts = [
-                    mobileISOFormat + 'Z',           // Treat as UTC first
-                    mobileISOFormat + '-05:00',      // EST 
-                    mobileISOFormat + '-04:00',      // EDT
-                    mobileISOFormat,                 // Local time fallback
-                ];
-                
-                for (const attempt of mobileTimezoneAttempts) {
-                    console.log('📱 Mobile trying:', attempt);
-                    const testDate = new Date(attempt);
-                    
-                    if (!isNaN(testDate.getTime())) {
-                        const now = new Date();
-                        const hoursDiff = Math.abs(testDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-                        
-                        console.log(`📱 Mobile parsed: ${testDate.toLocaleString()}, ${hoursDiff.toFixed(1)}h from now`);
-                        
-                        // Accept if within reasonable range (0.5 to 48 hours)
-                        if (hoursDiff >= 0.5 && hoursDiff <= 48) {
-                            console.log('✅ Mobile timezone fix succeeded with:', attempt);
-                            return testDate;
-                        } else {
-                            console.log('❌ Mobile time difference too large:', hoursDiff, 'hours');
-                        }
-                    } else {
-                        console.log('❌ Mobile parsing failed for:', attempt);
-                    }
-                }
-            } else {
-                // Already has timezone info, try parsing directly
-                const testDate = new Date(mobileISOFormat);
-                if (!isNaN(testDate.getTime())) {
-                    console.log('✅ Mobile direct ISO parsing succeeded');
-                    return testDate;
-                }
-            }
-        }
-        
-        // Mobile Strategy 2: Manual parsing for iOS Safari
-        if (isIOS) {
-            console.log('🍎 Applying iOS Safari-specific fixes...');
-            
-            // iOS Safari is extremely picky - manual parsing
-            const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[\s|T](\d{2}):(\d{2}):(\d{2})/);
-            if (isoMatch) {
-                const [, year, month, day, hour, minute, second] = isoMatch;
-                
-                // Create date components manually for iOS
-                const manualDate = new Date();
-                manualDate.setFullYear(parseInt(year));
-                manualDate.setMonth(parseInt(month) - 1); // Month is 0-based
-                manualDate.setDate(parseInt(day));
-                manualDate.setHours(parseInt(hour));
-                manualDate.setMinutes(parseInt(minute));
-                manualDate.setSeconds(parseInt(second));
-                manualDate.setMilliseconds(0);
-                
-                console.log('🍎 iOS manual parsing result:', manualDate.toLocaleString());
-                
-                if (!isNaN(manualDate.getTime())) {
-                    console.log('✅ iOS manual parsing succeeded');
-                    return manualDate;
-                }
-            }
-        }
-        
-        // Mobile Strategy 3: Use Date.parse() with mobile-friendly format
-        const mobileFriendlyFormat = dateString
-            .replace(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/, '$1-$2-$3T$4:$5:$6');
-        
-        const parseTimestamp = Date.parse(mobileFriendlyFormat);
-        if (!isNaN(parseTimestamp)) {
-            const parsedDate = new Date(parseTimestamp);
-            console.log('✅ Mobile Date.parse() succeeded');
-            return parsedDate;
-        }
-    }
-    
-    // DESKTOP FALLBACK (original logic)
-    console.log('💻 Using desktop parsing logic...');
-    
-    // Strategy 1: Direct parsing (works on desktop)
-    let date = new Date(dateString);
-    if (!isNaN(date.getTime())) {
-        console.log('universalDateParser: Desktop direct parsing succeeded');
-        return date;
-    }
-    
-    // Strategy 2: Fix format for desktop
-    if (dateString.includes(' ') && !dateString.includes('T')) {
-        const isoFixed = dateString.replace(' ', 'T');
-        date = new Date(isoFixed);
+    // DESKTOP LOGIC ONLY - what works on desktop
+    try {
+        // Method 1: Direct parsing (desktop way)
+        let date = new Date(dateString);
         if (!isNaN(date.getTime())) {
-            console.log('universalDateParser: Desktop ISO fix succeeded');
+            console.log('✅ Desktop direct parsing worked');
             return date;
         }
+        
+        // Method 2: Fix ESPN format (desktop way)
+        if (dateString.includes(' ') && !dateString.includes('T')) {
+            dateString = dateString.replace(' ', 'T');
+            date = new Date(dateString);
+            if (!isNaN(date.getTime())) {
+                console.log('✅ Desktop T-replacement worked');
+                return date;
+            }
+        }
+        
+        // Method 3: Force manual parsing if needed
+        const match = dateString.match(/(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
+        if (match) {
+            const [, year, month, day, hour, minute, second] = match;
+            // Create date exactly like desktop would
+            date = new Date(year, month - 1, day, hour, minute, second);
+            if (!isNaN(date.getTime())) {
+                console.log('✅ Manual parsing worked');
+                return date;
+            }
+        }
+        
+    } catch (error) {
+        console.error('Date parsing error:', error);
     }
     
-    console.error('universalDateParser: All strategies failed for:', dateString);
+    console.error('❌ All parsing methods failed for:', dateInput);
     return null;
 };
 
