@@ -2522,7 +2522,7 @@ const App = ({ user }) => {
                     matchup = await generateEnhancedDailyMatchup(new Date());
                 } else {
                     console.log('🔄 [MOBILE DEBUG] Regenerating existing matchup...');
-                    matchup = await generateEnhancedDailyDailyMatchup(new Date(userState.lastPickDate));
+                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
                 }
                 
                 // CRITICAL: Verify matchup before setting state
