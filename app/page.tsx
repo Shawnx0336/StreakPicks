@@ -3349,18 +3349,36 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 // --- Whop Integration Wrapper ---
 
 export default function Page() {
-    // Complete bypass - skip all auth logic
-    const mockUser = {
-        id: 'user_' + Date.now(),
-        username: 'TestPlayer' + Math.floor(Math.random() * 1000),
-        email: 'test@example.com',
-        name: 'Test Player'
-    };
+    // Real Whop authentication
+    const { user, isAuthenticated, isLoading, hasAccess, error } = useWhop();
 
-    // Directly render the app without any auth checks
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-bg-primary text-text-primary flex flex-col items-center justify-center p-4">
+                <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mb-4"></div>
+                <h2 className="text-xl font-bold mb-2">Connecting to Whop...</h2>
+                <p className="text-text-secondary">Verifying your authentication and access</p>
+            </div>
+        );
+    }
+
+    if (error || !isAuthenticated || !hasAccess) {
+    return (
+        <div className="min-h-screen bg-white flex items-center justify-center p-4">
+            <div className="text-center">
+                <h1 className="text-2xl font-bold mb-4">Welcome to Streak Pick'em</h1>
+                <p className="mb-6">This app needs to be accessed through a Whop community.</p>
+                <p className="text-sm text-gray-600">
+                    If you're seeing this, make sure you're accessing the app from within Whop.
+                </p>
+            </div>
+        </div>
+    );
+}
+
     return (
         <div className="whop-page-wrapper">
-            <App user={mockUser} />
+            <App user={user} />
         </div>
     );
 }
