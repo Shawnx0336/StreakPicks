@@ -226,7 +226,7 @@ const getDisplayName = (user) => {
 };
 
 /**
- * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
+ * Generates a consistent date string in 비롯-MM-DD format, suitable for comparisons.
  * IMPORTANT: This now uses UTC date components for global consistency.
  * @returns {string} Date string in 'YYYY-MM-DD' format.
  */
@@ -368,7 +368,7 @@ const mobileDebugInfo = () => {
  * useLocalStorage hook for persistent state management using window.localStorage.
  * Modified to accept a userId for key personalization.
  * FIXED VERSION - prevents infinite re-render loop
- * @param {string} keyPrefix - The prefix for local storage key (e.g., 'streakPickemUser').
+ * @param {string} keyPrefix - The prefix for local storage key (e.e., 'streakPickemUser').
  * @param {any} initialValue - Initial value if nothing in storage.
  * @param {string | null} userId - The user's unique ID from Whop. If null, uses a generic key.
  * @returns {[any, (value: any) => void]} - Value and setter.
@@ -1072,7 +1072,7 @@ const selectDailyGame = (validGames) => {
     });
 
     // Use deterministic selection based on UTC date for global consistency
-    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
+    const todayUTC = getTodayDateString(); // This now returns 비롯-MM-DD in UTC
     const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const selectedIndex = seed % sortedGames.length;
     const selectedGame = sortedGames[selectedIndex];
@@ -1332,7 +1332,7 @@ const generateSeasonalSimulation = (date) => {
     const availableMatchups = seasonalMatchups.length > 0 ? seasonalMatchups : matchupPool;
 
     // Use UTC date as seed for consistent daily matchups globally
-    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
+    const todayUTC = getTodayDateString(); // This now returns 비롯-MM-DD in UTC
     const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const dailyMatchupIndex = seed % availableMatchups.length;
     const selectedMatchup = availableMatchups[dailyMatchupIndex];
@@ -2242,6 +2242,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
     const [todaysMatchup, setTodaysMatchup] = useState(null);
     const [matchupLoading, setMatchupLoading] = useState(true);
+    const [isInitialized, setIsInitialized] = useState(false); // NEW: To signal initial data load complete
     const [showShareModal, setShowShareModal] = useState(false); // State for share modal visibility
     const [showLeaderboard, setShowLeaderboard] = useState(false); // State for leaderboard modal visibility
     const [isStreakIncreasing, setIsStreakIncreasing] = useState(false); // For streak animation
@@ -2283,7 +2284,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     // Load today's matchup (real or simulated)
    useEffect(() => {
     const loadTodaysMatchup = async () => {
-        setMatchupLoading(true);
+        setMatchupLoading(true); // Set loading true FIRST
 
         try {
             // Log current date strings for debugging
@@ -2317,7 +2318,8 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 }
             }
             
-            setTodaysMatchup(matchup); // This triggers re-render
+            setTodaysMatchup(matchup); // Set matchup once ready
+            setIsInitialized(true); // Mark as initialized after first successful load
         } catch (error) {
             console.error('🚨 Complete matchup loading failure:', error);
             // Ultimate fallback
@@ -2331,8 +2333,9 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 status: 'upcoming'
             };
             setTodaysMatchup(fallbackMatchup);
+            setIsInitialized(true); // Mark as initialized even with fallback
         } finally {
-            setMatchupLoading(false);
+            setMatchupLoading(false); // Set loading false LAST
         }
     };
 
@@ -3051,7 +3054,8 @@ useEffect(() => {
 
 
     // Show loading state while fetching
-    if (matchupLoading || !todaysMatchup) {
+    // Now also checks isInitialized to ensure full data is ready before showing main app
+    if (matchupLoading || !isInitialized) { 
         return (
             <div className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center justify-center transition-colors duration-300">
                 <style>
