@@ -293,6 +293,13 @@ const universalDateParser = (dateInput) => {
     }
     
     console.log('universalDateParser input:', dateInput, 'type:', typeof dateInput);
+    console.log('User agent:', navigator.userAgent);
+    
+    // Detect mobile browsers
+    const isMobile = /iPhone|iPad|iPod|Android|Mobile|Safari/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    
+    console.log('Device type:', { isMobile, isIOS });
     
     // If it's already a Date object
     if (dateInput instanceof Date) {
@@ -309,73 +316,143 @@ const universalDateParser = (dateInput) => {
         return isValid ? date : null;
     }
     
-    // If it's a string, try multiple parsing strategies
     const dateString = dateInput.toString().trim();
     console.log('universalDateParser: Processing string:', dateString);
     
-    // Strategy 1: Direct parsing (works on most browsers)
+    // MOBILE-SPECIFIC FIXES
+    if (isMobile) {
+        console.log('🔧 Applying mobile-specific date parsing...');
+        
+        // Mobile Strategy 1: Force ISO format for mobile browsers
+        if (dateString.includes(' ') && !dateString.includes('T')) {
+            // ESPN format: "2024-06-16 19:35:00" 
+            // Mobile needs: "2024-06-16T19:35:00"
+            let mobileISOFormat = dateString.replace(' ', 'T');
+            
+            // Mobile browsers are very strict about timezone info
+            if (!mobileISOFormat.includes('Z') && !mobileISOFormat.includes('+') && !mobileISOFormat.includes('-', 10)) {
+                // For mobile, we need to be explicit about timezone
+                // Try these in order of likelihood:
+                const mobileTimezoneAttempts = [
+                    mobileISOFormat + 'Z',           // Treat as UTC first
+                    mobileISOFormat + '-05:00',      // EST 
+                    mobileISOFormat + '-04:00',      // EDT
+                    mobileISOFormat,                 // Local time fallback
+                ];
+                
+                for (const attempt of mobileTimezoneAttempts) {
+                    console.log('📱 Mobile trying:', attempt);
+                    const testDate = new Date(attempt);
+                    
+                    if (!isNaN(testDate.getTime())) {
+                        const now = new Date();
+                        const hoursDiff = Math.abs(testDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+                        
+                        console.log(`📱 Mobile parsed: ${testDate.toLocaleString()}, ${hoursDiff.toFixed(1)}h from now`);
+                        
+                        // Accept if within reasonable range (0.5 to 48 hours)
+                        if (hoursDiff >= 0.5 && hoursDiff <= 48) {
+                            console.log('✅ Mobile timezone fix succeeded with:', attempt);
+                            return testDate;
+                        } else {
+                            console.log('❌ Mobile time difference too large:', hoursDiff, 'hours');
+                        }
+                    } else {
+                        console.log('❌ Mobile parsing failed for:', attempt);
+                    }
+                }
+            } else {
+                // Already has timezone info, try parsing directly
+                const testDate = new Date(mobileISOFormat);
+                if (!isNaN(testDate.getTime())) {
+                    console.log('✅ Mobile direct ISO parsing succeeded');
+                    return testDate;
+                }
+            }
+        }
+        
+        // Mobile Strategy 2: Manual parsing for iOS Safari
+        if (isIOS) {
+            console.log('🍎 Applying iOS Safari-specific fixes...');
+            
+            // iOS Safari is extremely picky - manual parsing
+            const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[\s|T](\d{2}):(\d{2}):(\d{2})/);
+            if (isoMatch) {
+                const [, year, month, day, hour, minute, second] = isoMatch;
+                
+                // Create date components manually for iOS
+                const manualDate = new Date();
+                manualDate.setFullYear(parseInt(year));
+                manualDate.setMonth(parseInt(month) - 1); // Month is 0-based
+                manualDate.setDate(parseInt(day));
+                manualDate.setHours(parseInt(hour));
+                manualDate.setMinutes(parseInt(minute));
+                manualDate.setSeconds(parseInt(second));
+                manualDate.setMilliseconds(0);
+                
+                console.log('🍎 iOS manual parsing result:', manualDate.toLocaleString());
+                
+                if (!isNaN(manualDate.getTime())) {
+                    console.log('✅ iOS manual parsing succeeded');
+                    return manualDate;
+                }
+            }
+        }
+        
+        // Mobile Strategy 3: Use Date.parse() with mobile-friendly format
+        const mobileFriendlyFormat = dateString
+            .replace(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/, '$1-$2-$3T$4:$5:$6');
+        
+        const parseTimestamp = Date.parse(mobileFriendlyFormat);
+        if (!isNaN(parseTimestamp)) {
+            const parsedDate = new Date(parseTimestamp);
+            console.log('✅ Mobile Date.parse() succeeded');
+            return parsedDate;
+        }
+    }
+    
+    // DESKTOP FALLBACK (original logic)
+    console.log('💻 Using desktop parsing logic...');
+    
+    // Strategy 1: Direct parsing (works on desktop)
     let date = new Date(dateString);
     if (!isNaN(date.getTime())) {
-        console.log('universalDateParser: Strategy 1 (direct) succeeded');
+        console.log('universalDateParser: Desktop direct parsing succeeded');
         return date;
     }
     
-    // Strategy 2: Fix common iOS Safari issues
-    // Replace space with T for ISO format
+    // Strategy 2: Fix format for desktop
     if (dateString.includes(' ') && !dateString.includes('T')) {
         const isoFixed = dateString.replace(' ', 'T');
-        console.log('universalDateParser: Trying ISO fix:', isoFixed);
         date = new Date(isoFixed);
         if (!isNaN(date.getTime())) {
-            console.log('universalDateParser: Strategy 2 (ISO fix) succeeded');
+            console.log('universalDateParser: Desktop ISO fix succeeded');
             return date;
-        }
-    }
-    
-    // Strategy 3: Parse ISO-like strings manually
-    const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(?:Z|([+-]\d{2}):?(\d{2}))?$/);
-    if (isoMatch) {
-        console.log('universalDateParser: Trying manual ISO parsing');
-        const [, year, month, day, hour, minute, second, ms = '0', tzHour = '0', tzMin = '0'] = isoMatch;
-        
-        const utcDate = new Date(Date.UTC(
-            parseInt(year), 
-            parseInt(month) - 1, 
-            parseInt(day), 
-            parseInt(hour), 
-            parseInt(minute), 
-            parseInt(second), 
-            parseInt(ms)
-        ));
-        
-        const tzOffset = (parseInt(tzHour) * 60 + parseInt(tzMin)) * 60 * 1000;
-        const finalDate = new Date(utcDate.getTime() - tzOffset);
-        
-        if (!isNaN(finalDate.getTime())) {
-            console.log('universalDateParser: Strategy 3 (manual ISO) succeeded');
-            return finalDate;
-        }
-    }
-    
-    // Strategy 4: Use Date.parse with fallbacks
-    const parseAttempts = [
-        dateString,
-        dateString.replace(/\s+/g, 'T'),
-        dateString.replace(/[^\d\-T:\.Z]/g, ''),
-        dateString + 'Z',
-    ];
-    
-    for (const attempt of parseAttempts) {
-        console.log('universalDateParser: Trying parse attempt:', attempt);
-        const timestamp = Date.parse(attempt);
-        if (!isNaN(timestamp)) {
-            console.log('universalDateParser: Strategy 4 (Date.parse) succeeded with:', attempt);
-            return new Date(timestamp);
         }
     }
     
     console.error('universalDateParser: All strategies failed for:', dateString);
     return null;
+};
+
+// MOBILE DEBUG HELPER - Add this temporarily to see what's happening
+const mobileDebugInfo = () => {
+    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    
+    console.log('=== MOBILE DEBUG INFO ===');
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Is Mobile:', isMobile);
+    console.log('Is iOS:', isIOS);
+    console.log('Timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
+    console.log('Current time:', new Date().toLocaleString());
+    
+    // Test date parsing
+    const testDate = "2024-06-16 19:35:00";
+    console.log('Test parsing:', testDate);
+    console.log('Direct new Date():', new Date(testDate).toString());
+    console.log('With T replacement:', new Date(testDate.replace(' ', 'T')).toString());
+    console.log('========================');
 };
 
 
@@ -2594,6 +2671,45 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
 }, [todaysMatchup?.startTime]); // Depend on startTime specifically
+
+// Mobile Timer Enhancement - ADD THIS AFTER YOUR EXISTING TIMER useEffect
+useEffect(() => {
+    // Mobile-specific timer fixes
+    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+    
+    if (isMobile && todaysMatchup?.startTime) {
+        console.log('📱 Setting up mobile timer enhancements...');
+        
+        // Mobile browsers pause timers when app goes to background
+        let isAppVisible = true;
+        
+        const handleVisibilityChange = () => {
+            isAppVisible = !document.hidden;
+            console.log('📱 App visibility changed:', isAppVisible ? 'visible' : 'hidden');
+            
+            if (isAppVisible) {
+                // App became visible again - force timer update
+                console.log('📱 App visible again, forcing timer refresh...');
+                // The main timer useEffect will handle the update
+            }
+        };
+        
+        const handlePageShow = () => {
+            console.log('📱 Page show event - mobile timer refresh');
+            isAppVisible = true;
+        };
+        
+        // Mobile-specific event listeners
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('pageshow', handlePageShow);
+        
+        // Cleanup
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('pageshow', handlePageShow);
+        };
+    }
+}, [todaysMatchup?.startTime]);
 
 
 
