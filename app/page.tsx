@@ -995,7 +995,7 @@ const parseESPNGameData = (event, sport) => {
             },
             sport: sport,
             venue: competition.venue?.fullName || `${sport} Stadium`,
-            startTime: new Date(event.date),
+            startTime: universalDateParser(event.date),
             status: event.status?.type?.detail || 'upcoming'
         };
 
