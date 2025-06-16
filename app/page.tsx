@@ -1041,20 +1041,25 @@ const validateGameData = (gameData) => {
 
     const gameTime = new Date(gameData.startTime);
     const now = new Date();
-    
-    // Since ESPN now returns only current date's games, just check if it's in the future
-    const isFuture = gameTime > now;
-    
-    if (!isFuture) {
-        console.log(`⚠️ Game already started: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}`);
-        return { valid: false, reason: 'Already started' };
+    const timeDiffMs = gameTime - now;
+    const timeDiffHours = timeDiffMs / (1000 * 60 * 60);
+
+    // CRITICAL FIX: More lenient time validation for mobile
+    // Allow games up to 1 hour past (instead of rejecting immediately)
+    // and up to 7 days in the future
+    if (timeDiffHours < -1 || timeDiffHours > 168) {
+        console.log(`⚠️ Game outside time window: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}, Diff: ${timeDiffHours.toFixed(2)} hours`);
+        return { valid: false, reason: 'Outside time window' };
     }
 
-    console.log('✅ VALID GAME:', {
-        game: `${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`,
-        time: gameTime.toLocaleTimeString(),
-        minutesFromNow: Math.round((gameTime - now) / (1000 * 60))
-    });
+    // Additional mobile debug logging
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+        console.log(`📱 VALID GAME: ${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`);
+        console.log(`📱 Game time: ${gameTime.toLocaleString()}`);
+        console.log(`📱 Current time: ${now.toLocaleString()}`);
+        console.log(`📱 Time difference: ${timeDiffHours.toFixed(2)} hours`);
+    }
 
     return { valid: true };
 };
@@ -1188,74 +1193,86 @@ const parseESPNGameData = (event, sport) => {
 
 // MANDATORY: Robust ESPN API with multiple fallback layers
 const fetchESPNData = async (retryCount = 0) => {
-    const MAX_RETRIES = 2; // Reduce retries for faster fallback
-    const TIMEOUT_MS = 8000; // Reduce timeout
+    const MAX_RETRIES = 2;
+    const TIMEOUT_MS = 12000; // Increased from 8000 for mobile
 
     try {
-        console.log(`🔄 ESPN API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+        // Mobile detection and logging
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        console.log(`🔄 ESPN API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-        // TRY MULTIPLE SPORTS if current sport fails
         const currentSport = getCurrentSport();
         const fallbackSports = ['NBA', 'NFL', 'MLB', 'NHL'].filter(s => s !== currentSport);
-        
-        let response, data;
-        
-        // Get current date for API call (works for any day, not just today)
         const currentDate = new Date();
 
-        // Try current sport first WITH DYNAMIC DATE PARAMETER
+        let response, data;
+        
         try {
             const apiUrl = getSportEndpoint(currentSport, currentDate);
-            console.log(`📅 Fetching games for ${currentDate.toLocaleDateString()}: ${apiUrl}`);
+            console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} fetching games for ${currentDate.toLocaleDateString()} (${currentDate.toISOString()}): ${apiUrl}`);
             
             response = await fetch(apiUrl, {
                 signal: controller.signal,
                 headers: {
                     'Accept': 'application/json',
-                    'User-Agent': 'StreakPickem/1.0'
+                    'User-Agent': isMobile ? 'StreakPickem/1.0 (Mobile)' : 'StreakPickem/1.0',
+                    'Cache-Control': 'no-cache', // CRITICAL: Prevent mobile caching
+                    'Pragma': 'no-cache' // Additional cache prevention
                 }
             });
             
-            if (response.ok) {
-                data = await response.json();
-                if (data.events && data.events.length > 0) {
-                    console.log(`✅ Got ${data.events.length} events from ${currentSport} for ${currentDate.toLocaleDateString()}`);
-                } else {
-                    throw new Error(`No events in ${currentSport} for ${currentDate.toLocaleDateString()}`);
-                }
-            } else {
+            if (!response.ok) {
                 throw new Error(`HTTP ${response.status} for ${currentSport}`);
             }
-        } catch (sportError) {
-            console.warn(`⚠️ ${currentSport} failed:`, sportError.message);
             
-            // Try fallback sports
+            data = await response.json();
+            
+            if (data.events && data.events.length > 0) {
+                console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} got ${data.events.length} events from ${currentSport} for ${currentDate.toLocaleDateString()}`);
+                
+                // MOBILE DEBUG: Log first event details
+                if (isMobile && data.events[0]) {
+                    console.log('📱 First event sample:', {
+                        name: data.events[0].name,
+                        shortName: data.events[0].shortName,
+                        date: data.events[0].date,
+                        status: data.events[0].status?.type?.name
+                    });
+                }
+            } else {
+                throw new Error(`No events in ${currentSport} for ${currentDate.toLocaleDateString()}`);
+            }
+        } catch (sportError) {
+            console.warn(`⚠️ ${currentSport} failed on ${isMobile ? 'Mobile' : 'Desktop'}:`, sportError.message);
+            
+            // Try fallback sports with same mobile logging
             for (const sport of fallbackSports) {
                 try {
-                    console.log(`🔄 Trying fallback sport: ${sport}`);
                     const apiUrl = getSportEndpoint(sport, currentDate);
-                    console.log(`📅 Fetching fallback games for ${currentDate.toLocaleDateString()}: ${apiUrl}`);
-
+                    console.log(`🔄 ${isMobile ? 'Mobile' : 'Desktop'} trying fallback sport: ${sport}`);
+                    
                     response = await fetch(apiUrl, {
                         signal: controller.signal,
                         headers: {
                             'Accept': 'application/json',
-                            'User-Agent': 'StreakPickem/1.0'
+                            'User-Agent': isMobile ? 'StreakPickem/1.0 (Mobile)' : 'StreakPickem/1.0',
+                            'Cache-Control': 'no-cache',
+                            'Pragma': 'no-cache'
                         }
                     });
                     
                     if (response.ok) {
                         data = await response.json();
                         if (data.events && data.events.length > 0) {
-                            console.log(`✅ Got ${data.events.length} events from fallback ${sport} for ${currentDate.toLocaleDateString()}`);
+                            console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} got ${data.events.length} events from fallback ${sport}`);
                             break;
                         }
                     }
                 } catch (fallbackError) {
-                    console.warn(`⚠️ Fallback ${sport} failed:`, fallbackError.message);
+                    console.warn(`⚠️ Fallback ${sport} failed on ${isMobile ? 'Mobile' : 'Desktop'}:`, fallbackError.message);
                     continue;
                 }
             }
@@ -1267,31 +1284,34 @@ const fetchESPNData = async (retryCount = 0) => {
 
         clearTimeout(timeoutId);
 
-        // IMPROVED: Process ALL games, then filter
-        console.log(`📊 Processing ${data.events.length} raw events`);
+        // Enhanced game processing with mobile logging
+        console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} processing ${data.events.length} raw events`);
         
         const allValidGames = [];
         const rejectedGames = [];
         
         for (const event of data.events) {
             try {
-                // First parse the game
                 const parsedGame = parseESPNGameData(event, currentSport);
-                
-                // Then validate the parsed game
                 const validation = validateGameData(parsedGame);
                 
                 if (validation.valid) {
                     allValidGames.push(parsedGame);
+                    if (isMobile) {
+                        console.log(`📱 VALID: ${parsedGame.homeTeam.name} vs ${parsedGame.awayTeam.name} at ${new Date(parsedGame.startTime).toLocaleTimeString()}`);
+                    }
                 } else {
                     rejectedGames.push({
                         game: `${event.shortName || event.name}`,
                         reason: validation.reason,
                         startTime: event.date
                     });
+                    if (isMobile) {
+                        console.log(`📱 REJECTED: ${event.shortName || event.name} - ${validation.reason}`);
+                    }
                 }
             } catch (parseError) {
-                console.warn(`⚠️ Failed to parse event ${event.id}:`, parseError.message);
+                console.warn(`⚠️ Failed to parse event ${event.id} on ${isMobile ? 'Mobile' : 'Desktop'}:`, parseError.message);
                 rejectedGames.push({
                     game: event.name || 'Unknown',
                     reason: 'Parse error',
@@ -1300,32 +1320,31 @@ const fetchESPNData = async (retryCount = 0) => {
             }
         }
 
-        console.log(`✅ Valid games found: ${allValidGames.length}`);
-        console.log(`❌ Rejected games: ${rejectedGames.length}`);
+        console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} - Valid games: ${allValidGames.length}, Rejected: ${rejectedGames.length}`);
         
-        // Log first few rejected games for debugging
-        if (rejectedGames.length > 0) {
-            console.log('🔍 Sample rejected games:', rejectedGames.slice(0, 3));
+        if (rejectedGames.length > 0 && isMobile) {
+            console.log('📱 Sample rejected games:', rejectedGames.slice(0, 3));
         }
 
         if (allValidGames.length === 0) {
-            throw new Error(`No valid games after processing ${data.events.length} events. Common rejections: ${rejectedGames.slice(0, 3).map(r => r.reason).join(', ')}`);
+            const rejectionReasons = rejectedGames.slice(0, 3).map(r => r.reason).join(', ');
+            throw new Error(`No valid games after processing ${data.events.length} events. Common rejections: ${rejectionReasons}`);
         }
 
-        // Select the daily game
         return selectDailyGame(allValidGames);
 
     } catch (error) {
-        console.error(`🚨 ESPN API Error (Attempt ${retryCount + 1}):`, error.message);
-
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        console.error(`🚨 ESPN API Error (Attempt ${retryCount + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}:`, error.message);
+        
         if (retryCount < MAX_RETRIES) {
             const delayMs = Math.pow(2, retryCount) * 1000;
-            console.log(`⏰ Retrying in ${delayMs}ms...`);
+            console.log(`⏰ ${isMobile ? 'Mobile' : 'Desktop'} retrying in ${delayMs}ms...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
             return fetchESPNData(retryCount + 1);
         }
-
-        console.error('🚨 ESPN API COMPLETELY FAILED - Using emergency fallback');
+        
+        console.error(`🚨 ESPN API COMPLETELY FAILED on ${isMobile ? 'Mobile' : 'Desktop'} - Using emergency fallback`);
         throw error;
     }
 };
@@ -2297,46 +2316,75 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
 
     // Load today's matchup (real or simulated)
-   useEffect(() => {
+   // Load today's matchup (real or simulated)
+useEffect(() => {
     const loadTodaysMatchup = async () => {
-        setMatchupLoading(true); // Set loading true FIRST
+        setMatchupLoading(true);
 
         try {
+            // Mobile debugging
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            if (isMobile) {
+                console.log('📱 MOBILE MATCHUP LOADING DEBUG:');
+                console.log('📱 User Agent:', navigator.userAgent);
+                console.log('📱 Online Status:', navigator.onLine);
+                console.log('📱 Connection:', navigator.connection?.effectiveType || 'unknown');
+                console.log('📱 Current Date:', new Date().toLocaleString());
+                console.log('📱 UTC Date:', new Date().toISOString());
+            }
+
             // Log current date strings for debugging
-            console.log('DEBUG: UserState Last Pick Date (from storage):', userState.lastPickDate);
-            console.log('DEBUG: Today String (UTC based):', today);
+            console.log(`DEBUG: UserState Last Pick Date: ${userState.lastPickDate}`);
+            console.log(`DEBUG: Today String (UTC): ${today}`);
             const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
-            console.log('DEBUG: Needs New Matchup:', needsNewMatchup);
+            console.log(`DEBUG: Needs New Matchup: ${needsNewMatchup}`);
 
             let matchup = null;
             if (needsNewMatchup) {
-                console.log('🔄 Loading new daily matchup...');
+                console.log(`🔄 ${isMobile ? 'Mobile' : 'Desktop'} loading new daily matchup...`);
                 try {
-                    matchup = await generateEnhancedDailyMatchup(new Date()); // Passing current date
-                    console.log('✅ Successfully loaded ESPN matchup:', {
+                    matchup = await generateEnhancedDailyMatchup(new Date());
+                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} successfully loaded matchup:`, {
                         game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`,
                         sport: matchup.sport,
-                        isReal: !matchup.id.includes('fallback')
+                        isReal: !matchup.id.includes('fallback') && !matchup.id.includes('emergency'),
+                        id: matchup.id,
+                        venue: matchup.venue
                     });
                 } catch (espnError) {
-                    console.error('🚨 ESPN API failed, using simulation:', espnError.message);
-                    matchup = generateSeasonalSimulation(new Date()); // Passing current date
+                    console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed:`, espnError.message);
+                    console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} using seasonal simulation fallback`);
+                    matchup = generateSeasonalSimulation(new Date());
                 }
             } else {
-                console.log('📅 Regenerating today\'s matchup...');
-                // Ensure to pass a Date object derived from the stored ISO string for consistent seeding
+                console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} regenerating today's matchup...`);
                 try {
                     matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
                 } catch (espnError) {
-                    console.error('🚨 ESPN API failed for existing date, using simulation:', espnError.message);
+                    console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed for existing date:`, espnError.message);
                     matchup = generateSeasonalSimulation(new Date(userState.lastPickDate));
                 }
             }
             
-            setTodaysMatchup(matchup); // Set matchup once ready
-            setIsInitialized(true); // Mark as initialized after first successful load
+            // CRITICAL: Log final matchup details for debugging
+            if (isMobile) {
+                console.log('📱 FINAL MATCHUP SET:', {
+                    id: matchup.id,
+                    homeTeam: matchup.homeTeam.name,
+                    awayTeam: matchup.awayTeam.name,
+                    sport: matchup.sport,
+                    venue: matchup.venue,
+                    startTime: matchup.startTime,
+                    isEmergencyFallback: matchup.id.includes('emergency-fallback')
+                });
+            }
+            
+            setTodaysMatchup(matchup);
+            setIsInitialized(true);
         } catch (error) {
-            console.error('🚨 Complete matchup loading failure:', error);
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} complete matchup loading failure:`, error);
+            
             // Ultimate fallback
             const fallbackMatchup = {
                 id: 'emergency-fallback',
@@ -2344,13 +2392,13 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
                 sport: 'Emergency',
                 venue: 'Fallback Arena',
-                startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now, as ISO string
+                startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
                 status: 'upcoming'
             };
             setTodaysMatchup(fallbackMatchup);
-            setIsInitialized(true); // Mark as initialized even with fallback
+            setIsInitialized(true);
         } finally {
-            setMatchupLoading(false); // Set loading false LAST
+            setMatchupLoading(false);
         }
     };
 
