@@ -226,7 +226,7 @@ const getDisplayName = (user) => {
 };
 
 /**
- * Generates a consistent date string in 비롯-MM-DD format, suitable for comparisons.
+ * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
  * IMPORTANT: This now uses UTC date components for global consistency.
  * @returns {string} Date string in 'YYYY-MM-DD' format.
  */
@@ -1041,25 +1041,20 @@ const validateGameData = (gameData) => {
 
     const gameTime = new Date(gameData.startTime);
     const now = new Date();
-    const timeDiffMs = gameTime - now;
-    const timeDiffHours = timeDiffMs / (1000 * 60 * 60);
-
-    // CRITICAL FIX: More lenient time validation for mobile
-    // Allow games up to 1 hour past (instead of rejecting immediately)
-    // and up to 7 days in the future
-    if (timeDiffHours < -1 || timeDiffHours > 168) {
-        console.log(`⚠️ Game outside time window: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}, Diff: ${timeDiffHours.toFixed(2)} hours`);
-        return { valid: false, reason: 'Outside time window' };
+    
+    // Since ESPN now returns only current date's games, just check if it's in the future
+    const isFuture = gameTime > now;
+    
+    if (!isFuture) {
+        console.log(`⚠️ Game already started: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}`);
+        return { valid: false, reason: 'Already started' };
     }
 
-    // Additional mobile debug logging
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-        console.log(`📱 VALID GAME: ${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`);
-        console.log(`📱 Game time: ${gameTime.toLocaleString()}`);
-        console.log(`📱 Current time: ${now.toLocaleString()}`);
-        console.log(`📱 Time difference: ${timeDiffHours.toFixed(2)} hours`);
-    }
+    console.log('✅ VALID GAME:', {
+        game: `${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`,
+        time: gameTime.toLocaleTimeString(),
+        minutesFromNow: Math.round((gameTime - now) / (1000 * 60))
+    });
 
     return { valid: true };
 };
@@ -1092,7 +1087,7 @@ const selectDailyGame = (validGames) => {
     });
 
     // Use deterministic selection based on UTC date for global consistency
-    const todayUTC = getTodayDateString(); // This now returns 비롯-MM-DD in UTC
+    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
     const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const selectedIndex = seed % sortedGames.length;
     const selectedGame = sortedGames[selectedIndex];
@@ -1110,193 +1105,220 @@ const selectDailyGame = (validGames) => {
 };
 
 /**
- * Parses ESPN API game data into our app's Matchup format
- * @param {Object} event - Raw event data from ESPN API
- * @param {string} sport - Sport type
+ * Parses MLB API game data into app's Matchup format
+ * @param {Object} game - Raw game data from MLB API
  * @returns {Matchup} Formatted matchup object
  */
-const parseESPNGameData = (event, sport) => {
+const parseMLBGameData = (game) => {
     try {
-        const competition = event.competitions[0];
-        const competitors = competition.competitors;
-
-        const homeTeamRaw = competitors.find(c => c.homeAway === 'home');
-        const awayTeamRaw = competitors.find(c => c.homeAway === 'away');
-
-        if (!homeTeamRaw || !awayTeamRaw || !homeTeamRaw.team || !awayTeamRaw.team) {
-            throw new Error('Could not find complete home/away team data for event: ' + event.id);
-        }
-
-        const sportEmoji = getSportEmoji(sport);
-
-        // ULTRA SIMPLE: Just use basic new Date() like desktop
-        console.log('🎯 Raw ESPN date:', event.date);
-        let gameStartTime;
+        const homeTeam = game.teams.home.team;
+        const awayTeam = game.teams.away.team;
         
+        if (!homeTeam || !awayTeam) {
+            throw new Error('Missing team data in MLB game');
+        }
+        
+        // Parse game date - MLB API provides ISO string
+        let gameStartTime;
         try {
-            // Method 1: Direct - what desktop does
-            gameStartTime = new Date(event.date);
-            console.log('📅 Direct parsing result:', gameStartTime.toString());
-            
-            // If that fails, try with T replacement
-            if (isNaN(gameStartTime.getTime()) && typeof event.date === 'string' && event.date.includes(' ')) {
-                console.log('🔄 Trying T replacement...');
-                gameStartTime = new Date(event.date.replace(' ', 'T'));
-                console.log('📅 T replacement result:', gameStartTime.toString());
-            }
-            
-            // If still invalid, create fallback
+            gameStartTime = new Date(game.gameDate);
             if (isNaN(gameStartTime.getTime())) {
-                console.warn('⚠️ Date parsing failed, using fallback');
-                gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
+                throw new Error('Invalid game date format');
             }
-            
-        } catch (error) {
-            console.error('Date parsing error:', error);
+        } catch (dateError) {
+            console.warn('⚠️ Date parsing failed, using fallback');
             gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
         }
-
-        console.log('✅ Final game time:', gameStartTime.toString());
-
+        
+        console.log('✅ MLB game parsed:', {
+            home: homeTeam.name,
+            away: awayTeam.name,
+            time: gameStartTime.toLocaleString(),
+            venue: game.venue?.name || 'MLB Stadium'
+        });
+        
         return {
-            id: event.id,
+            id: game.gamePk.toString(),
             homeTeam: {
-                name: homeTeamRaw.team.displayName || homeTeamRaw.team.name,
-                abbr: homeTeamRaw.team.abbreviation,
-                logo: sportEmoji,
-                colors: [
-                    (homeTeamRaw.team.color || '505050'),
-                    (homeTeamRaw.team.alternateColor || '808080')
-                ]
+                name: homeTeam.name,
+                abbr: homeTeam.abbreviation,
+                logo: '⚾',
+                colors: getMLBTeamColors(homeTeam.abbreviation)
             },
             awayTeam: {
-                name: awayTeamRaw.team.displayName || awayTeamRaw.team.name,
-                abbr: awayTeamRaw.team.abbreviation,
-                logo: sportEmoji,
-                colors: [
-                    (awayTeamRaw.team.color || '505050'),
-                    (awayTeamRaw.team.alternateColor || '808080')
-                ]
+                name: awayTeam.name,
+                abbr: awayTeam.abbreviation,
+                logo: '⚾',
+                colors: getMLBTeamColors(awayTeam.abbreviation)
             },
-            sport: sport,
-            venue: competition.venue?.fullName || `${sport} Stadium`,
-            // FIXED: Ensure startTime is stored as an ISO string
+            sport: 'MLB',
+            venue: game.venue?.name || 'MLB Stadium',
             startTime: gameStartTime.toISOString(),
-            status: event.status?.type?.detail || 'upcoming'
+            status: game.status?.detailedState || 'scheduled'
         };
-
+        
     } catch (error) {
-        console.error('Error parsing ESPN game data for event:', event.id, error);
+        console.error('Error parsing MLB game data:', error);
         throw error;
     }
 };
 
-// MANDATORY: Robust ESPN API with multiple fallback layers
-const fetchESPNData = async (retryCount = 0) => {
+
+/**
+ * Gets MLB team colors by abbreviation
+ * @param {string} abbr - Team abbreviation (e.g., 'NYY', 'BOS')
+ * @returns {string[]} Array of primary and secondary colors
+ */
+const getMLBTeamColors = (abbr) => {
+    const teamColors = {
+        // American League East
+        'BAL': ['DF4601', '000000'], // Orange, Black
+        'BOS': ['BD3039', '0C2340'], // Red, Navy
+        'NYY': ['132448', 'C4CED4'], // Navy, Silver
+        'TB': ['092C5C', '8FBCE6'], // Navy, Light Blue
+        'TOR': ['134A8E', 'E8291C'], // Blue, Red
+        
+        // American League Central
+        'CWS': ['000000', 'C4CED4'], // Black, Silver
+        'CLE': ['E31937', '0C2340'], // Red, Navy
+        'DET': ['0C2340', 'FA4616'], // Navy, Orange
+        'KC': ['004687', 'BD9B60'], // Blue, Gold
+        'MIN': ['002B5C', 'D31145'], // Navy, Red
+        
+        // American League West
+        'HOU': ['002D62', 'EB6E1F'], // Navy, Orange
+        'LAA': ['BA0021', '003263'], // Red, Navy
+        'OAK': ['003831', 'EFB21E'], // Green, Gold
+        'SEA': ['0C2C56', '005C5C'], // Navy, Teal
+        'TEX': ['003278', 'C0111F'], // Blue, Red
+        
+        // National League East
+        'ATL': ['CE1141', '13274F'], // Red, Navy
+        'MIA': ['00A3E0', 'EF3340'], // Blue, Red
+        'NYM': ['002D72', 'FF5910'], // Blue, Orange
+        'PHI': ['E81828', '002D72'], // Red, Blue
+        'WSH': ['AB0003', '14225A'], // Red, Navy
+        
+        // National League Central
+        'CHC': ['0E3386', 'CC3433'], // Blue, Red
+        'CIN': ['C6011F', '000000'], // Red, Black
+        'MIL': ['FFC52F', '12284B'], // Gold, Navy
+        'PIT': ['FDB827', '27251F'], // Gold, Black
+        'STL': ['C41E3A', '0C2340'], // Red, Navy
+        
+        // National League West
+        'ARI': ['A71930', 'E3D4AD'], // Red, Tan
+        'COL': ['33006F', 'C4CED4'], // Purple, Silver
+        'LAD': ['005A9C', 'EF3E42'], // Blue, Red
+        'SD': ['2F241D', 'FFC425'], // Brown, Gold
+        'SF': ['FD5A1E', '27251F']  // Orange, Black
+    };
+    
+    return teamColors[abbr] || ['505050', '808080']; // Default gray colors
+};
+
+/**
+ * Fetches MLB game data from MLB's official API
+ * @param {number} retryCount - Current retry attempt
+ * @returns {Promise<Matchup>} Selected daily matchup
+ */
+const fetchMLBData = async (retryCount = 0) => {
     const MAX_RETRIES = 2;
-    const TIMEOUT_MS = 12000;
+    const TIMEOUT_MS = 10000;
 
     try {
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        console.log(`🔄 ESPN API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}`);
+        console.log(`⚾ MLB API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-        const currentSport = getCurrentSport();
+        // Get current date in YYYY-MM-DD format
         const currentDate = new Date();
-        const apiUrl = getSportEndpoint(currentSport, currentDate);
-
+        const dateString = currentDate.toISOString().split('T')[0];
+        
+        // MLB Official API endpoint
+        const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateString}`;
+        console.log(`📅 Fetching MLB games for ${dateString}: ${apiUrl}`);
+        
         const response = await fetch(apiUrl, {
             signal: controller.signal,
             headers: {
                 'Accept': 'application/json',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
+                'User-Agent': 'StreakPickem/1.0'
             }
         });
-
-        if (!response.ok) throw new Error(`HTTP ${response.status} for ${currentSport}`);
-        const data = await response.json();
-
-        if (!data.events || data.events.length === 0) throw new Error(`No events in ${currentSport}`);
-
-        console.log(`✅ Got ${data.events.length} events from ${currentSport}`);
-        return selectDailyGame(data.events.map(event => parseESPNGameData(event, currentSport)));
-    } catch (error) {
-        console.error(`🚨 ESPN API Error (Attempt ${retryCount + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}:`, error.message);
-        if (retryCount < MAX_RETRIES) {
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-            return fetchESPNData(retryCount + 1);
-        }
-        console.error(`🚨 ESPN API COMPLETELY FAILED - Using emergency fallback`);
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
-    }
-};
-
-        // Enhanced game processing with mobile logging
-        console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} processing ${data.events.length} raw events`);
         
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`MLB API returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('✅ MLB API Response received');
+        
+        // Check if games exist for today
+        if (!data.dates || data.dates.length === 0 || !data.dates[0].games || data.dates[0].games.length === 0) {
+            throw new Error(`No MLB games found for ${dateString}`);
+        }
+        
+        const games = data.dates[0].games;
+        console.log(`✅ Found ${games.length} MLB games for ${dateString}`);
+        
+        // Process games and filter valid ones
         const allValidGames = [];
         const rejectedGames = [];
         
-        for (const event of data.events) {
+        for (const game of games) {
             try {
-                const parsedGame = parseESPNGameData(event, currentSport);
+                const parsedGame = parseMLBGameData(game);
                 const validation = validateGameData(parsedGame);
                 
                 if (validation.valid) {
                     allValidGames.push(parsedGame);
-                    if (isMobile) {
-                        console.log(`📱 VALID: ${parsedGame.homeTeam.name} vs ${parsedGame.awayTeam.name} at ${new Date(parsedGame.startTime).toLocaleTimeString()}`);
-                    }
+                    console.log(`✅ VALID: ${parsedGame.homeTeam.name} vs ${parsedGame.awayTeam.name} at ${new Date(parsedGame.startTime).toLocaleTimeString()}`);
                 } else {
                     rejectedGames.push({
-                        game: `${event.shortName || event.name}`,
+                        game: `${game.teams.home.team.abbreviation} vs ${game.teams.away.team.abbreviation}`,
                         reason: validation.reason,
-                        startTime: event.date
+                        startTime: game.gameDate
                     });
-                    if (isMobile) {
-                        console.log(`📱 REJECTED: ${event.shortName || event.name} - ${validation.reason}`);
-                    }
+                    console.log(`⚠️ REJECTED: ${game.teams.home.team.abbreviation} vs ${game.teams.away.team.abbreviation} - ${validation.reason}`);
                 }
             } catch (parseError) {
-                console.warn(`⚠️ Failed to parse event ${event.id} on ${isMobile ? 'Mobile' : 'Desktop'}:`, parseError.message);
+                console.warn(`⚠️ Failed to parse MLB game ${game.gamePk}:`, parseError.message);
                 rejectedGames.push({
-                    game: event.name || 'Unknown',
+                    game: `Game ${game.gamePk}`,
                     reason: 'Parse error',
                     error: parseError.message
                 });
             }
         }
-
-        console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} - Valid games: ${allValidGames.length}, Rejected: ${rejectedGames.length}`);
         
-        if (rejectedGames.length > 0 && isMobile) {
-            console.log('📱 Sample rejected games:', rejectedGames.slice(0, 3));
+        console.log(`✅ Valid games: ${allValidGames.length}, Rejected: ${rejectedGames.length}`);
+        
+        if (rejectedGames.length > 0) {
+            console.log('🔍 Sample rejected games:', rejectedGames.slice(0, 3));
         }
-
+        
         if (allValidGames.length === 0) {
-            const rejectionReasons = rejectedGames.slice(0, 3).map(r => r.reason).join(', ');
-            throw new Error(`No valid games after processing ${data.events.length} events. Common rejections: ${rejectionReasons}`);
+            throw new Error(`No valid games after processing ${games.length} games. Common rejections: ${rejectedGames.slice(0, 3).map(r => r.reason).join(', ')}`);
         }
-
+        
+        // Select daily game using existing logic
         return selectDailyGame(allValidGames);
-
+        
     } catch (error) {
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        console.error(`🚨 ESPN API Error (Attempt ${retryCount + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}:`, error.message);
+        console.error(`🚨 MLB API Error (Attempt ${retryCount + 1}):`, error.message);
         
         if (retryCount < MAX_RETRIES) {
             const delayMs = Math.pow(2, retryCount) * 1000;
-            console.log(`⏰ ${isMobile ? 'Mobile' : 'Desktop'} retrying in ${delayMs}ms...`);
+            console.log(`⏰ Retrying in ${delayMs}ms...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
-            return fetchESPNData(retryCount + 1);
+            return fetchMLBData(retryCount + 1);
         }
         
-        console.error(`🚨 ESPN API COMPLETELY FAILED on ${isMobile ? 'Mobile' : 'Desktop'} - Using emergency fallback`);
+        console.error('🚨 MLB API COMPLETELY FAILED - Using emergency fallback');
         throw error;
     }
 };
@@ -1318,7 +1340,7 @@ const generateSeasonalSimulation = (date) => {
     const availableMatchups = seasonalMatchups.length > 0 ? seasonalMatchups : matchupPool;
 
     // Use UTC date as seed for consistent daily matchups globally
-    const todayUTC = getTodayDateString(); // This now returns 비롯-MM-DD in UTC
+    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
     const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const dailyMatchupIndex = seed % availableMatchups.length;
     const selectedMatchup = availableMatchups[dailyMatchupIndex];
@@ -1347,97 +1369,79 @@ const generateSeasonalSimulation = (date) => {
 };
 
 /**
- * Enhanced daily matchup generator with real API integration
- * @param {Date} date - Date for matchup generation (used for simulation seed)
+ * Enhanced daily matchup generator using MLB Official API
+ * @param {Date} date - Date for matchup generation
  * @returns {Promise<Matchup>} Real or simulated matchup
  */
 const generateEnhancedDailyMatchup = async (date) => {
-    // Try to fetch real sports data first using the robust fetchESPNData
+    // Try to fetch real MLB data first
     try {
-        const realMatchup = await fetchESPNData();
+        const realMatchup = await fetchMLBData();
         if (realMatchup) {
-            console.log('✅ Using real sports data for daily matchup.');
+            console.log('✅ Using real MLB data for daily matchup');
+            console.log(`⚾ Game: ${realMatchup.homeTeam.name} vs ${realMatchup.awayTeam.name}`);
+            console.log(`🏟️ Venue: ${realMatchup.venue}`);
+            console.log(`⏰ Time: ${new Date(realMatchup.startTime).toLocaleString()}`);
             return realMatchup;
         }
     } catch (error) {
-        console.log('⚠️ Real sports data failed, falling back to seasonal simulation:', error.message);
+        console.log('⚠️ MLB API failed, falling back to simulation:', error.message);
     }
 
-    // Fallback to enhanced simulation with seasonal awareness and validation compliance
-    console.log('📊 Using simulated seasonal data for daily matchup.');
+    // Fallback to simulation
+    console.log('📊 Using simulated seasonal data for daily matchup');
     return generateSeasonalSimulation(date);
 };
 
 /**
- * Fetches the actual result of a completed game using direct game endpoint (more reliable).
- * @param {string} gameId - ESPN game ID
- * @param {string} sport - Sport type
+ * Fetches actual MLB game result using MLB Official API
+ * @param {string} gameId - MLB game ID (gamePk)
+ * @param {string} sport - Sport type (should be 'MLB')
  * @returns {Promise<Object|null>} Game result or null
  */
-const fetchGameResultDirect = async (gameId, sport) => {
+const fetchMLBGameResult = async (gameId, sport) => {
     try {
-        const sportLeagueMap = {
-            'MLB': 'baseball/mlb',
-            'NBA': 'basketball/nba',
-            'NFL': 'football/nfl',
-            'NHL': 'hockey/nhl',
-            'Soccer': 'soccer/fifa.world', // Example for soccer (might need real endpoint)
-            'NCAAB': 'basketball/mens-college-basketball' // Example for college hoops (might need real endpoint)
-        };
-
-        const leaguePath = sportLeagueMap[sport];
-        if (!leaguePath) {
-            console.warn(`Unsupported sport for direct game result: ${sport}`);
-            return null; // Fallback to other method
-        }
-
-        const gameUrl = `https://site.api.espn.com/apis/site/v2/sports/${leaguePath}/summary?event=${gameId}`;
-
-        console.log(`Fetching game result from: ${gameUrl}`);
-
+        console.log(`🔍 Fetching MLB game result for game ${gameId}`);
+        
+        const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
         const response = await fetch(gameUrl);
-
+        
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(`MLB API returned ${response.status}`);
         }
-
+        
         const data = await response.json();
-
+        
         // Check if game is completed
-        const header = data.header;
-        const competition = header?.competitions?.[0]; // Access first competition
-
-        if (!competition) {
-            throw new Error('No competition data found in summary');
+        const gameData = data.gameData;
+        const liveData = data.liveData;
+        
+        if (!gameData || !liveData) {
+            throw new Error('Invalid game data structure');
         }
-
-        const gameStatus = competition.status?.type?.state;
-        if (gameStatus !== 'post') {
-            console.log(`Game ${gameId} not finished yet. Status: ${gameStatus}`);
+        
+        const gameStatus = gameData.status.statusCode;
+        if (gameStatus !== 'F' && gameStatus !== 'O') { // F = Final, O = Official
+            console.log(`Game ${gameId} not finished yet. Status: ${gameData.status.detailedState}`);
             return null;
         }
-
-        // Extract scores from competition data
-        const competitors = competition.competitors;
-        const homeTeam = competitors.find(c => c.homeAway === 'home');
-        const awayTeam = competitors.find(c => c.homeAway === 'away');
-
-        if (!homeTeam || !awayTeam || !homeTeam.team || !awayTeam.team) {
-            throw new Error('Could not find complete home/away team data in summary');
-        }
-
-        const homeScore = parseInt(homeTeam.score || 0); // Ensure score is parsed as int
-        const awayScore = parseInt(awayTeam.score || 0);
-
+        
+        // Extract final scores
+        const homeScore = liveData.linescore?.teams?.home?.runs || 0;
+        const awayScore = liveData.linescore?.teams?.away?.runs || 0;
+        
         let winner = null;
         if (homeScore > awayScore) {
             winner = 'home';
         } else if (awayScore > homeScore) {
             winner = 'away';
         } else {
-            winner = 'tie';
+            winner = 'tie'; // Very rare in baseball
         }
-
+        
+        const homeTeam = gameData.teams.home;
+        const awayTeam = gameData.teams.away;
+        
         return {
             gameId: gameId,
             status: 'completed',
@@ -1445,21 +1449,21 @@ const fetchGameResultDirect = async (gameId, sport) => {
             awayScore: awayScore,
             winner: winner,
             homeTeam: {
-                name: homeTeam.team.displayName,
-                abbreviation: homeTeam.team.abbreviation,
+                name: homeTeam.name,
+                abbreviation: homeTeam.abbreviation,
                 score: homeScore
             },
             awayTeam: {
-                name: awayTeam.team.displayName,
-                abbreviation: awayTeam.team.abbreviation,
+                name: awayTeam.name,
+                abbreviation: awayTeam.abbreviation,
                 score: awayScore
             },
-            completedAt: new Date(data.header.lastModified || Date.now()), // Use lastModified or current time
+            completedAt: new Date(),
             rawGameData: data
         };
-
+        
     } catch (error) {
-        console.error(`Error fetching direct game result for ${gameId}:`, error);
+        console.error(`Error fetching MLB game result for ${gameId}:`, error);
         return null;
     }
 };
@@ -2268,86 +2272,67 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
 
     // Load today's matchup (real or simulated)
-   // Load today's matchup (real or simulated)
-useEffect(() => {
-    let isMounted = true;
+   useEffect(() => {
     const loadTodaysMatchup = async () => {
-        setMatchupLoading(true);
+        setMatchupLoading(true); // Set loading true FIRST
 
         try {
-            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            console.log(`📱 MOBILE MATCHUP LOADING DEBUG: Start at ${new Date().toLocaleString()}`);
-            console.log(`DEBUG: UserState Last Pick Date: ${userState.lastPickDate}`);
-            console.log(`DEBUG: Today String (UTC): ${today}`);
+            // Log current date strings for debugging
+            console.log('DEBUG: UserState Last Pick Date (from storage):', userState.lastPickDate);
+            console.log('DEBUG: Today String (UTC based):', today);
             const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
-            console.log(`DEBUG: Needs New Matchup: ${needsNewMatchup}`);
+            console.log('DEBUG: Needs New Matchup:', needsNewMatchup);
 
             let matchup = null;
             if (needsNewMatchup) {
-                console.log(`🔄 ${isMobile ? 'Mobile' : 'Desktop'} loading new daily matchup...`);
+                console.log('🔄 Loading new daily matchup...');
                 try {
-                    matchup = await generateEnhancedDailyMatchup(new Date());
-                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} loaded real matchup:`, {
-                        id: matchup.id,
-                        game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`
+                    // OLD: const realMatchup = await fetchESPNData();
+                    const realMatchup = await fetchMLBData(); // NEW: Call fetchMLBData
+                    console.log('✅ Successfully loaded MLB matchup:', {
+                        game: `${realMatchup.homeTeam.name} vs ${realMatchup.awayTeam.name}`,
+                        sport: realMatchup.sport,
+                        isReal: !realMatchup.id.includes('fallback')
                     });
-                } catch (espnError) {
-                    console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed:`, espnError.message);
-                    console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} using seasonal simulation`);
-                    matchup = generateSeasonalSimulation(new Date());
+                    matchup = realMatchup;
+                } catch (mlbError) { // Changed error variable name
+                    console.error('🚨 MLB API failed, using simulation:', mlbError.message); // Changed log message
+                    matchup = generateSeasonalSimulation(new Date()); // Passing current date
                 }
             } else {
-                console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} regenerating today’s matchup...`);
+                console.log('📅 Regenerating today\'s matchup...');
+                // Ensure to pass a Date object derived from the stored ISO string for consistent seeding
                 try {
-                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
-                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} regenerated real matchup:`, {
-                        id: matchup.id,
-                        game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`
-                    });
-                } catch (espnError) {
-                    console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed for existing date:`, espnError.message);
+                    // OLD: matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
+                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate)); // NEW: Call generateEnhancedDailyMatchup which now uses MLB
+                } catch (mlbError) { // Changed error variable name
+                    console.error('🚨 MLB API failed for existing date, using simulation:', mlbError.message); // Changed log message
                     matchup = generateSeasonalSimulation(new Date(userState.lastPickDate));
                 }
             }
-
-            if (isMounted && matchup) {
-                console.log(`📱 FINAL MATCHUP SET:`, {
-                    id: matchup.id,
-                    homeTeam: matchup.homeTeam.name,
-                    awayTeam: matchup.awayTeam.name,
-                    startTime: matchup.startTime
-                });
-                setTodaysMatchup(matchup);
-            }
+            
+            setTodaysMatchup(matchup); // Set matchup once ready
+            setIsInitialized(true); // Mark as initialized after first successful load
         } catch (error) {
-            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} complete matchup loading failure:`, error);
-            if (isMounted) {
-                const fallbackMatchup = {
-                    id: 'emergency-fallback',
-                    homeTeam: { name: 'Team A', abbr: 'TEA', logo: '🏠', colors: ['505050', '808080'] },
-                    awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
-                    sport: 'Emergency',
-                    venue: 'Fallback Arena',
-                    startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                    status: 'upcoming'
-                };
-                console.log(`📱 FALLBACK APPLIED:`, {
-                    id: fallbackMatchup.id,
-                    game: `${fallbackMatchup.homeTeam.name} vs ${fallbackMatchup.awayTeam.name}`
-                });
-                setTodaysMatchup(fallbackMatchup);
-            }
+            console.error('🚨 Complete matchup loading failure:', error);
+            // Ultimate fallback
+            const fallbackMatchup = {
+                id: 'emergency-fallback',
+                homeTeam: { name: 'Team A', abbr: 'TEA', logo: '🏠', colors: ['505050', '808080'] },
+                awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
+                sport: 'Emergency',
+                venue: 'Fallback Arena',
+                startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now, as ISO string
+                status: 'upcoming'
+            };
+            setTodaysMatchup(fallbackMatchup);
+            setIsInitialized(true); // Mark as initialized even with fallback
         } finally {
-            if (isMounted) {
-                setMatchupLoading(false);
-                setIsInitialized(true);
-            }
+            setMatchupLoading(false); // Set loading false LAST
         }
     };
 
     loadTodaysMatchup();
-    return () => { isMounted = false; }; // Cleanup on unmount
 }, [today, userState.lastPickDate]);
 
 
@@ -2628,91 +2613,6 @@ useEffect(() => {
 
 
     /**
-     * Checks the actual result of a completed game using the scoreboard endpoint.
-     * This is a fallback if the direct summary endpoint fails.
-     * @param {string} gameId - ESPN game ID
-     * @param {string} sport - Sport type for API endpoint
-     * @returns {Promise<Object|null>} Game result or null if not available
-     */
-    const fetchGameResult = async (gameId, sport) => {
-        try {
-            // Get current date for API call to ensure we fetch the correct day's scoreboard
-            const currentDate = new Date();
-            const apiUrl = getSportEndpoint(sport, currentDate); // Pass currentDate here
-            const response = await fetch(apiUrl);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            // Find the specific game by ID
-            const game = data.events?.find(event => event.id === gameId);
-
-            if (!game) {
-                console.log(`Game ${gameId} not found in current API response (scoreboard)`);
-                return null;
-            }
-
-            // Check if game is completed
-            const gameStatus = game.status?.type?.state;
-            if (gameStatus !== 'post') {
-                console.log(`Game ${gameId} not finished yet. Status: ${gameStatus}`);
-                return null;
-            }
-
-            // Extract the final scores
-            const competition = game.competitions[0];
-            const competitors = competition.competitors;
-
-            const homeTeamResult = competitors.find(c => c.homeAway === 'home');
-            const awayTeamResult = competitors.find(c => c.homeAway === 'away');
-
-            if (!homeTeamResult || !awayTeamResult) {
-                throw new Error('Could not find home/away team data in completed game (scoreboard)');
-            }
-
-            const homeScore = parseInt(homeTeamResult.score || 0);
-            const awayScore = parseInt(awayTeamResult.score || 0);
-
-            // Determine winner
-            let winner = null;
-            if (homeScore > awayScore) {
-                winner = 'home';
-            } else if (awayScore > homeScore) {
-                winner = 'away';
-            } else {
-                winner = 'tie'; // Handle ties (rare in most sports)
-            }
-
-            return {
-                gameId: gameId,
-                status: 'completed',
-                homeScore: homeScore,
-                awayScore: awayScore,
-                winner: winner,
-                homeTeam: {
-                    name: homeTeamResult.team.displayName || homeTeamResult.team.name,
-                    abbreviation: homeTeamResult.team.abbreviation,
-                    score: homeScore
-                },
-                awayTeam: {
-                    name: awayTeamResult.team.displayName || awayTeamResult.team.name,
-                    abbreviation: awayTeamResult.team.abbreviation,
-                    score: awayScore
-                },
-                completedAt: new Date(game.status?.type?.detail || new Date()),
-                rawGameData: game // Keep for debugging
-            };
-
-        } catch (error) {
-            console.error(`Error fetching result for game ${gameId} (scoreboard):`, error);
-            return null;
-        }
-    };
-
-    /**
      * Checks the actual result of a user's pick (REPLACES simulateResult)
      * @param {Object} pick - The user's pick object
      * @param {Matchup} matchup - The matchup details
@@ -2749,13 +2649,8 @@ useEffect(() => {
             try {
                 console.log(`🔍 Checking result for game ${pick.matchupId} (Attempt ${attempt})...`);
 
-                // Try direct game endpoint first, fall back to scoreboard
-                let gameResult = await fetchGameResultDirect(pick.matchupId, matchup.sport);
-
-                if (!gameResult) {
-                    console.log('Direct endpoint failed, trying scoreboard endpoint...');
-                    gameResult = await fetchGameResult(pick.matchupId, matchup.sport);
-                }
+                // OLD: let gameResult = await fetchGameResultDirect(pick.matchupId, matchup.sport);
+                let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); // NEW: Call fetchMLBGameResult
 
                 if (!gameResult) {
                     if (attempt < MAX_ATTEMPTS) {
@@ -2854,7 +2749,7 @@ useEffect(() => {
             }
         }, delayForThisAttempt);
 
-    }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats, fetchGameResult, fetchGameResultDirect]);
+    }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats]);
 
 
     /**
