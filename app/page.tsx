@@ -29,7 +29,7 @@ const useWhop = () => {
     const [user, setUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [hasAccess, setHasAccess] = useState(false);
-    const [error, setError] = useState<Error | null>(null);
+    const [error, setError] = useState(null);
     const [isClient, setIsClient] = useState(false);
 
     // Fix hydration issues by ensuring we're on the client
@@ -168,10 +168,10 @@ const useWhop = () => {
 
 /**
  * Simple string hashing function for consistent anonymous IDs.
- * @param {string} str - Input string.
+ * @param {string | null | undefined} str - Input string.
  * @returns {number} Numeric hash.
  */
-const simpleHash = (str: string | null | undefined) => {
+const simpleHash = (str) => {
     let hash = 0;
     if (str === null || str === undefined) { // Handle null or undefined string input
         str = '';
@@ -189,7 +189,7 @@ const simpleHash = (str: string | null | undefined) => {
  * @param {string} userId - The user's unique ID.
  * @returns {string} Generated display name.
  */
-const generateDisplayName = (userId: string) => {
+const generateDisplayName = (userId) => {
     const adjectives = ['Fire', 'Ice', 'Lightning', 'Storm', 'Steel', 'Shadow', 'Blazing', 'Mighty', 'Swift', 'Golden', 'Mystic', 'Crimson', 'Azure', 'Jade', 'Silver', 'Bronze', 'Diamond', 'Emerald', 'Vapor', 'Echo'];
     const nouns = ['Picker', 'Prophet', 'Analyst', 'Streak', 'Eagle', 'Tiger', 'Champion', 'Master', 'Wizard', 'Legend', 'Striker', 'Scout', 'Oracle', 'Hunter', 'Guardian', 'Titan', 'Specter', 'Vanguard', 'Pioneer', 'Maverick'];
 
@@ -220,10 +220,148 @@ const getMondayOfCurrentWeek = () => {
  * @param {Object} user - Whop user object
  * @returns {string} Display name to use
  */
-const getDisplayName = (user: any) => {
+const getDisplayName = (user) => {
     // Always use Whop account information
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
+
+/**
+ * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
+ * This helps avoid timezone issues with toDateString().
+ * @returns {string} Date string in 'YYYY-MM-DD' format.
+ */
+const getTodayDateString = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * Checks if a Date object is valid.
+ * @param {Date} date - The Date object to check.
+ * @returns {boolean} True if the date is valid, false otherwise.
+ */
+const isValidDate = (date) => {
+    return date instanceof Date && !isNaN(date.getTime());
+};
+
+/**
+ * Safely parses a date input into a Date object, returning null if invalid.
+ * @param {*} dateInput - The input to parse (e.g., string, number, Date object).
+ * @returns {Date | null} A valid Date object or null.
+ */
+const safeParseDate = (dateInput) => {
+    if (!dateInput) return null;
+    
+    const date = new Date(dateInput);
+    return isValidDate(date) ? date : null;
+};
+
+// === CRITICAL FIX 1: ADD MISSING validateMatchupData FUNCTION ===
+/**
+ * Validates matchup data to ensure it has all required fields and valid dates.
+ * @param {Object} matchup - The matchup object to validate.
+ * @returns {{ isValid: boolean, error?: string, gameTime?: Date }} Validation result.
+ */
+const validateMatchupData = (matchup) => {
+    if (!matchup) {
+        return { isValid: false, error: 'No matchup data' };
+    }
+
+    if (!matchup.startTime) {
+        return { isValid: false, error: 'No start time' };
+    }
+
+    const gameTime = safeParseDate(matchup.startTime);
+    if (!gameTime) {
+        return { isValid: false, error: 'Invalid start time format' };
+    }
+
+    // Check if date is reasonable (not too far in past/future)
+    const now = new Date();
+    const daysDiff = Math.abs(gameTime - now) / (1000 * 60 * 60 * 24);
+    
+    if (daysDiff > 30) {
+        return { isValid: false, error: 'Game time too far from current date' };
+    }
+
+    return { isValid: true, gameTime };
+};
+
+// === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
+const universalDateParser = (dateInput) => {
+    if (!dateInput) return null;
+    
+    // If it's already a Date object
+    if (dateInput instanceof Date) {
+        return isNaN(dateInput.getTime()) ? null : dateInput;
+    }
+    
+    // If it's a timestamp
+    if (typeof dateInput === 'number') {
+        const date = new Date(dateInput);
+        return isNaN(date.getTime()) ? null : date;
+    }
+    
+    // If it's a string, try multiple parsing strategies
+    const dateString = dateInput.toString().trim();
+    
+    // Strategy 1: Direct parsing (works on most browsers)
+    let date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+        return date;
+    }
+    
+    // Strategy 2: Fix common iOS Safari issues
+    if (dateString.includes(' ') && !dateString.includes('T')) {
+        const isoFixed = dateString.replace(' ', 'T');
+        date = new Date(isoFixed);
+        if (!isNaN(date.getTime())) {
+            return date;
+        }
+    }
+    
+    // Strategy 3: Parse ISO-like strings manually
+    const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(?:Z|([+-]\d{2}):?(\d{2}))?$/);
+    if (isoMatch) {
+        const [, year, month, day, hour, minute, second, ms = '0', tzHour = '0', tzMin = '0'] = isoMatch;
+        
+        const utcDate = new Date(Date.UTC(
+            parseInt(year), 
+            parseInt(month) - 1, 
+            parseInt(day), 
+            parseInt(hour), 
+            parseInt(minute), 
+            parseInt(second), 
+            parseInt(ms)
+        ));
+        
+        const tzOffset = (parseInt(tzHour) * 60 + parseInt(tzMin)) * 60 * 1000;
+        const finalDate = new Date(utcDate.getTime() - tzOffset);
+        
+        if (!isNaN(finalDate.getTime())) {
+            return finalDate;
+        }
+    }
+    
+    // Strategy 4: Use Date.parse with fallbacks
+    const parseAttempts = [
+        dateString,
+        dateString.replace(/\s+/g, 'T'),
+        dateString.replace(/[^\d\-T:\.Z]/g, ''),
+        dateString + 'Z',
+    ];
+    
+    for (const attempt of parseAttempts) {
+        const timestamp = Date.parse(attempt);
+        if (!isNaN(timestamp)) {
+            return new Date(timestamp);
+        }
+    }
+    
+    console.error('Could not parse date:', dateString);
+    return null;
+};
+
 
 // --- Custom Hooks ---
 
@@ -236,7 +374,7 @@ const getDisplayName = (user: any) => {
  * @param {string | null} userId - The user's unique ID from Whop. If null, uses a generic key.
  * @returns {[any, (value: any) => void]} - Value and setter.
  */
-const useLocalStorage = (keyPrefix: string, initialValue: any, userId: string | null) => {
+const useLocalStorage = (keyPrefix, initialValue, userId) => {
     // Construct a user-specific key, or a generic one if no user ID is available
     const storageKey = userId ? `${keyPrefix}_${userId}` : keyPrefix;
 
@@ -250,7 +388,7 @@ const useLocalStorage = (keyPrefix: string, initialValue: any, userId: string | 
             const item = window.localStorage.getItem(storageKey);
             let parsedItem = item ? JSON.parse(item) : initialValue;
 
-            const todayString = new Date().toDateString();
+            const todayString = getTodayDateString(); // Use the new reliable date string
             const currentWeekMonday = getMondayOfCurrentWeek();
 
             // Handle date-based resets for userState only
@@ -350,7 +488,7 @@ const useSound = (soundEnabled) => {
         // Initialize AudioContext if not already
         if (typeof window !== 'undefined' && !audioContext.current) {
     try {
-        audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
     } catch (e) {
         console.warn('AudioContext not supported:', e);
     }
@@ -795,7 +933,7 @@ const matchupPool = [
         homeTeam: { name: 'Paris SG', abbr: 'PSG', logo: '⚽', colors: ['004170', 'DA291C'] },
         awayTeam: { name: 'Bayern Munich', abbr: 'BAY', logo: '⚽', colors: ['DC052D', '0066B2'] },
         sport: 'Soccer',
-        venue: 'Parc des Princes'
+        venue: 'Santiago Bernabéu'
     }
 ];
 
@@ -935,7 +1073,7 @@ const selectDailyGame = (validGames) => {
     });
 
     // Use deterministic selection based on date
-    const today = new Date().toISOString().split('T')[0]; //YYYY-MM-DD
+    const today = getTodayDateString(); // Use the new reliable date string
     const seed = today.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const selectedIndex = seed % sortedGames.length;
     const selectedGame = sortedGames[selectedIndex];
@@ -995,6 +1133,7 @@ const parseESPNGameData = (event, sport) => {
             },
             sport: sport,
             venue: competition.venue?.fullName || `${sport} Stadium`,
+            // === AND UPDATE parseESPNGameData TO USE IT ===
             startTime: universalDateParser(event.date),
             status: event.status?.type?.detail || 'upcoming'
         };
@@ -2024,6 +2163,30 @@ const ErrorDisplay = ({ message }) => (
 );
 
 
+// ===== FIX 7: DEBUGGING HELPER =====
+const debugMatchupData = (matchup) => {
+    console.log('=== MATCHUP DEBUG ===');
+    console.log('Raw matchup:', matchup);
+    console.log('Start time:', matchup?.startTime);
+    console.log('Start time type:', typeof matchup?.startTime);
+    console.log('Parsed date:', safeParseDate(matchup?.startTime));
+    console.log('Current time:', new Date());
+    console.log('Validation:', validateMatchupData(matchup));
+    console.log('===================');
+};
+
+// ===== FIX 8: EMERGENCY FALLBACK =====
+const EmergencyFallback = () => (
+    <div className="text-center mb-6 px-6">
+        <div className="text-center text-sm text-text-secondary mb-2">
+            Unable to load game time
+        </div>
+        <p className="text-lg font-semibold text-text-primary">
+            <span className="text-yellow-500">⚠️ Please refresh the app</span>
+        </p>
+    </div>
+);
+
 // --- Main App Component ---
 const App = ({ user }) => { // Accept user prop from Whop wrapper
     const userId = user?.id || 'anonymous'; // Use Whop user ID for persistence
@@ -2046,7 +2209,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const { playSound } = useSound(userState.soundEnabled);
     const { addNotification, notifications, dismissNotification } = useNotifications();
 
-    const today = new Date().toDateString();
+    const today = getTodayDateString(); // Use the new reliable date string
     const currentWeekMonday = getMondayOfCurrentWeek();
 
     const [todaysMatchup, setTodaysMatchup] = useState(null);
@@ -2146,40 +2309,202 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const [timeLeft, setTimeLeft] = useState('');
     const [gameStarted, setGameStarted] = useState(false);
 
-    // Enhanced timer effect with better timezone handling and display
-    useEffect(() => {
-        if (!todaysMatchup) return; // Wait for matchup to be loaded
+    // ===== FIX 2: BULLETPROOF GameTimeDisplay =====
+    const GameTimeDisplay = ({ startTime }) => {
+        // Early return if no startTime
+        if (!startTime) {
+            console.warn('GameTimeDisplay: No startTime provided');
+            return null;
+        }
 
-        const timer = setInterval(() => {
-            const now = new Date();
-            const gameTime = new Date(todaysMatchup.startTime);
-            const distance = gameTime.getTime() - now.getTime();
+        // Safe date parsing
+        const gameTime = safeParseDate(startTime);
+        if (!gameTime) {
+            console.error('GameTimeDisplay: Invalid startTime:', startTime);
+            return (
+                <div className="text-center text-sm text-red-500 mb-2">
+                    ⚠️ Invalid game time
+                </div>
+            );
+        }
 
-            if (distance < 0) {
-                setGameStarted(true);
-                setTimeLeft('Game Started!');
-                clearInterval(timer);
-            } else {
-                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+        const now = new Date();
+        if (!isValidDate(now)) {
+            console.error('GameTimeDisplay: System date invalid');
+            return null;
+        }
 
-                // Better time formatting
-                if (days > 0) {
-                    setTimeLeft(`${days}d ${hours}h ${minutes}m`);
-                } else if (hours > 0) {
-                    setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-                } else if (minutes > 0) {
-                    setTimeLeft(`${minutes}m ${seconds}s`);
+        // Safe date comparisons
+        try {
+            // Use local date comparisons to avoid timezone issues
+            const gameLocalDate = new Date(gameTime.getFullYear(), gameTime.getMonth(), gameTime.getDate());
+            const nowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const tomorrowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+            
+            const isToday = gameLocalDate.getTime() === nowLocalDate.getTime();
+            const isTomorrow = gameLocalDate.getTime() === tomorrowLocalDate.getTime();
+
+            // Safe formatting with fallbacks
+            let dayText = 'Unknown';
+            let timeText = 'Unknown';
+
+            try {
+                if (isToday) {
+                    dayText = 'Today';
+                } else if (isTomorrow) {
+                    dayText = 'Tomorrow';
                 } else {
-                    setTimeLeft(`${seconds}s`);
+                    const dateFormatter = new Intl.DateTimeFormat('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric'
+                    });
+                    dayText = dateFormatter.format(gameTime);
+                }
+
+                const timeFormatter = new Intl.DateTimeFormat('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+                timeText = timeFormatter.format(gameTime);
+
+            } catch (formatError) {
+                console.error('Date formatting error:', formatError);
+                // Fallback to basic formatting
+                dayText = gameTime.toLocaleDateString();
+                timeText = gameTime.toLocaleTimeString();
+            }
+
+            return (
+                <div className="text-center text-sm text-text-secondary mb-2 timer-text">
+                    <span className="font-medium">{dayText}</span>
+                    <span className="mx-2">•</span>
+                    <span className="font-medium">{timeText}</span>
+                </div>
+            );
+
+        } catch (error) {
+            console.error('GameTimeDisplay error:', error);
+            return (
+                <div className="text-center text-sm text-red-500 mb-2">
+                    ⚠️ Date display error
+                </div>
+            );
+        }
+    };
+
+
+    // ===== FIX 3: BULLETPROOF TIMER LOGIC (REPLACED ORIGINAL useEffect) =====
+    useEffect(() => {
+        // Early validation
+        if (!todaysMatchup || !todaysMatchup.startTime) {
+            console.warn('Timer: No matchup or startTime available');
+            setTimeLeft('Loading...');
+            return;
+        }
+
+        // Validate game time
+        const gameTime = safeParseDate(todaysMatchup.startTime);
+        if (!gameTime) {
+            console.error('Timer: Invalid game startTime:', todaysMatchup.startTime);
+            setTimeLeft('Invalid game time');
+            return;
+        }
+
+        let animationFrame;
+        let lastUpdate = 0;
+        let isComponentMounted = true;
+
+        const updateTimer = (timestamp) => {
+            if (!isComponentMounted) return;
+            
+            // Throttle updates
+            if (timestamp - lastUpdate >= 1000) {
+                try {
+                    const now = Date.now();
+                    const gameTimeMs = gameTime.getTime();
+                    
+                    // Validate timestamps
+                    if (isNaN(now) || isNaN(gameTimeMs)) {
+                        console.error('Timer: Invalid timestamps', { now, gameTimeMs });
+                        setTimeLeft('Timer error');
+                        return;
+                    }
+
+                    const distance = gameTimeMs - now;
+
+                    if (distance < 0) {
+                        setGameStarted(true);
+                        setTimeLeft('Game Started!');
+                        return;
+                    }
+
+                    // Safe math calculations
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                    // Validate calculations
+                    if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
+                        console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
+                        setTimeLeft('Calculation error');
+                        return;
+                    }
+
+                    // Format time string
+                    let timeString = '';
+                    if (days > 0) {
+                        timeString = `${days}d ${hours}h ${minutes}m`;
+                    } else if (hours > 0) {
+                        timeString = `${hours}h ${minutes}m ${seconds}s`;
+                    } else if (minutes > 0) {
+                        timeString = `${minutes}m ${seconds}s`;
+                    } else {
+                        timeString = `${seconds}s`;
+                    }
+
+                    setTimeLeft(timeString);
+                    lastUpdate = timestamp;
+
+                } catch (error) {
+                    console.error('Timer calculation error:', error);
+                    setTimeLeft('Timer error');
+                    return;
                 }
             }
-        }, 1000);
 
-        return () => clearInterval(timer);
-    }, [todaysMatchup]); // Depend on todaysMatchup
+            // Continue animation loop
+            if (isComponentMounted) {
+                animationFrame = requestAnimationFrame(updateTimer);
+            }
+        };
+
+        // Handle visibility changes
+        const handleVisibilityChange = () => {
+            if (!document.hidden && isComponentMounted) {
+                lastUpdate = 0;
+                animationFrame = requestAnimationFrame(updateTimer);
+            } else if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        
+        // Initial update
+        animationFrame = requestAnimationFrame(updateTimer);
+
+        return () => {
+            isComponentMounted = false;
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [todaysMatchup?.startTime]); // Depend on startTime specifically
+
 
     /**
      * Checks the actual result of a completed game using the scoreboard endpoint.
@@ -2430,7 +2755,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
             matchupId: todaysMatchup.id,
             selectedTeam: teamChoice,
             timestamp: new Date().toISOString(),
-            date: today
+            date: today // Use ISO format instead of toDateString()
         };
 
         setUserState(prev => ({
@@ -2626,45 +2951,10 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
             </div>
         );
     }
+    
+    // ===== FIX 4: SAFE MATCHUP DATA VALIDATION (Integrated into render logic) =====
+    const validation = validateMatchupData(todaysMatchup);
 
-    // Add this component to display the actual game time
-    const GameTimeDisplay = ({ startTime }) => {
-        if (!startTime) return null;
-
-        const gameTime = new Date(startTime);
-        const now = new Date();
-        const isToday = gameTime.toDateString() === now.toDateString();
-        const isTomorrow = gameTime.toDateString() === new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString();
-
-        const timeOptions = {
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZoneName: 'short'
-        };
-
-        const dateOptions = {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric'
-        };
-
-        let dayText = '';
-        if (isToday) {
-            dayText = 'Today';
-        } else if (isTomorrow) {
-            dayText = 'Tomorrow';
-        } else {
-            dayText = gameTime.toLocaleDateString('en-US', dateOptions);
-        }
-
-        return (
-            <div className="text-center text-sm text-text-secondary mb-2">
-                <span className="font-medium">{dayText}</span>
-                <span className="mx-2">•</span>
-                <span className="font-medium">{gameTime.toLocaleTimeString('en-US', timeOptions)}</span>
-            </div>
-        );
-    };
 
     // Enhanced Header Component
     const EnhancedHeader = ({ userState, leaderboardData, onOpenLeaderboard }) => {
@@ -2784,7 +3074,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
                     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
                     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                    --shadow-xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
                     
                     /* Transitions */
                     --transition-fast: 150ms ease-out;
@@ -3121,6 +3411,53 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
                 70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
                 }
+
+                /* Mobile timer and date fixes */
+                @media (max-width: 640px) {
+                    .timer-text {
+                        -webkit-user-select: none;
+                        -moz-user-select: none;
+                        user-select: none;
+                        -webkit-touch-callout: none;
+                        transform: translateZ(0); /* Force hardware acceleration */
+                        will-change: contents;
+                    }
+                    
+                    .game-time-display {
+                        min-height: 60px;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                        align-items: center;
+                        padding: 0 8px;
+                    }
+                    .timer-display {
+                        font-size: 1rem; /* Smaller font on mobile */
+                        line-height: 1.4;
+                        word-break: break-word; /* Prevent overflow */
+                        text-align: center;
+                        padding: 0 8px; /* Add padding to prevent edge cutting */
+                    }
+                    .game-time-container {
+                        min-height: 60px; /* Ensure consistent height */
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                        align-items: center;
+                    }
+                }
+
+                /* iOS Safari specific fixes */
+                @supports (-webkit-appearance: none) {
+                    .timer-text {
+                        -webkit-transform: translateZ(0);
+                        -webkit-backface-visibility: hidden;
+                    }
+                    .timer-display {
+                        transform: translateZ(0); /* Force hardware acceleration */
+                        will-change: contents; /* Optimize for changing content */
+                    }
+                }
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3171,7 +3508,13 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     {/* Game Time Display - UPDATED */}
                     <div className="text-center mb-6 px-6"> {/* Added padding to align */}
                         {/* Show actual game time */}
-                        <GameTimeDisplay startTime={todaysMatchup.startTime} />
+                        {todaysMatchup?.startTime && validation.isValid ? (
+                            <GameTimeDisplay startTime={todaysMatchup.startTime} />
+                        ) : (
+                            <div className="text-center text-sm text-red-500 mb-2">
+                                ⚠️ {validation.error || 'Invalid game time'}
+                            </div>
+                        )}
 
                         {/* Show countdown */}
                         <p className="text-lg font-semibold text-text-primary">
@@ -3179,7 +3522,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                                 <span className="text-red-500">🔴 Game Started!</span>
                             ) : (
                                 <span className="text-green-500">
-                                    ⏰ Starts in: <span className="font-mono">{timeLeft}</span>
+                                    ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
                                 </span>
                             )}
                         </p>
@@ -3279,7 +3622,9 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                         <button
                             onClick={async () => {
                                 try {
-                                    const response = await fetch('/api/auth/logout', {
+                                    // FIX: Use complete URL for logout as well
+                                    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+                                    const response = await fetch(`${baseUrl}/api/auth/logout`, {
                                         method: 'POST',
                                         credentials: 'include'
                                     });
@@ -3358,8 +3703,11 @@ export default function Page() {
             try {
                 console.log('🔍 Checking for Whop user...');
                 
+                // FIX: Use window.location.origin to build complete URL
+                const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+                
                 // First, try to get real Whop user from headers
-                const whopResponse = await fetch('/api/whop/user', {
+                const whopResponse = await fetch(`${baseUrl}/api/whop/user`, {
                     method: 'GET',
                     credentials: 'include'
                 });
