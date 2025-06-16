@@ -257,103 +257,28 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
-// === CRITICAL FIX 1: UPDATE validateMatchupData FUNCTION ===
 /**
- * Validates matchup data to ensure it has all required fields and valid dates.
- * @param {Object} matchup - The matchup object to validate.
- * @returns {{ isValid: boolean, error?: string, gameTime: Date }} Validation result.
+ * Consolidates date parsing logic for game times.
+ * @param {*} startTime - The raw start time from the API or stored state.
+ * @returns {Date | null} A valid Date object, or a fallback Date, or null if unrecoverable.
  */
-const validateMatchupData = (matchup) => {
-    if (!matchup) {
-        console.warn('No matchup data provided');
-        return { 
-            isValid: true, 
-            gameTime: new Date(Date.now() + 60 * 60 * 1000), // Fallback: 1 hour from now
-            error: 'No matchup data, using fallback time' 
-        };
+const parseGameTime = (startTime) => {
+    if (!startTime) return null;
+
+    // Attempt to parse directly
+    let gameTime = startTime instanceof Date ? startTime : new Date(startTime);
+
+    // If direct parsing failed for a string, try replacing space with 'T'
+    if (isNaN(gameTime.getTime()) && typeof startTime === 'string' && startTime.includes(' ')) {
+        gameTime = new Date(startTime.replace(' ', 'T'));
     }
 
-    if (!matchup.startTime) {
-        console.warn('No startTime in matchup:', matchup);
-        return { 
-            isValid: true, 
-            gameTime: new Date(Date.now() + 60 * 60 * 1000), 
-            error: 'No start time, using fallback time' 
-        };
-    }
-
-    let gameTime = matchup.startTime;
-    if (!(gameTime instanceof Date)) {
-        console.log('Parsing startTime string:', gameTime);
-        gameTime = new Date(gameTime);
-    }
-
+    // If still invalid, provide a fallback time
     if (isNaN(gameTime.getTime())) {
-        console.warn('Invalid startTime format:', matchup.startTime);
-        gameTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
-        return { 
-            isValid: true, 
-            gameTime, 
-            error: 'Invalid startTime format, using fallback' 
-        };
+        console.warn('Fallback to 2h from now for game time parsing.');
+        return new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
     }
-
-    console.log('✅ Validated matchup time:', gameTime.toISOString());
-    return { isValid: true, gameTime };
-};
-
-// === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
-const universalDateParser = (dateInput) => {
-    if (!dateInput) return null;
-    
-    // FORCE DESKTOP BEHAVIOR - ignore mobile differences
-    console.log('🔧 FORCING desktop behavior for:', dateInput);
-    
-    // If it's already a Date object, return it
-    if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
-    }
-    
-    // Convert to string and clean it
-    let dateString = String(dateInput).trim();
-    
-    // DESKTOP LOGIC ONLY - what works on desktop
-    try {
-        // Method 1: Direct parsing (desktop way)
-        let date = new Date(dateString);
-        if (!isNaN(date.getTime())) {
-            console.log('✅ Desktop direct parsing worked');
-            return date;
-        }
-        
-        // Method 2: Fix ESPN format (desktop way)
-        if (dateString.includes(' ') && !dateString.includes('T')) {
-            dateString = dateString.replace(' ', 'T');
-            date = new Date(dateString);
-            if (!isNaN(date.getTime())) {
-                console.log('✅ Desktop T-replacement worked');
-                return date;
-            }
-        }
-        
-        // Method 3: Force manual parsing if needed
-        const match = dateString.match(/(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
-        if (match) {
-            const [, year, month, day, hour, minute, second] = match;
-            // Create date exactly like desktop would
-            date = new Date(year, month - 1, day, hour, minute, second);
-            if (!isNaN(date.getTime())) {
-                console.log('✅ Manual parsing worked');
-                return date;
-            }
-        }
-        
-    } catch (error) {
-        console.error('Date parsing error:', error);
-    }
-    
-    console.error('❌ All parsing methods failed for:', dateInput);
-    return null;
+    return gameTime;
 };
 
 // MOBILE DEBUG HELPER - Add this temporarily to see what's happening
@@ -1034,26 +959,31 @@ const GAME_VALIDATION_RULES = {
  * @returns {{ valid: boolean, reason?: string }} Validation result.
  */
 const validateGameData = (gameData) => {
-    // Basic checks
     if (!gameData?.startTime || !gameData?.homeTeam?.name || !gameData?.awayTeam?.name) {
         return { valid: false, reason: 'Missing required data' };
     }
 
     const gameTime = new Date(gameData.startTime);
     const now = new Date();
-    
-    // Since ESPN now returns only current date's games, just check if it's in the future
-    const isFuture = gameTime > now;
-    
-    if (!isFuture) {
-        console.log(`⚠️ Game already started: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}`);
-        return { valid: false, reason: 'Already started' };
+    const diffHours = (gameTime - now) / (1000 * 60 * 60);
+
+    if (isNaN(gameTime.getTime())) {
+        return { valid: false, reason: 'Invalid start time' };
+    }
+
+    if (diffHours < GAME_VALIDATION_RULES.MIN_HOURS_PAST || diffHours > GAME_VALIDATION_RULES.MAX_HOURS_FUTURE) {
+        return { valid: false, reason: `Outside valid time window (${GAME_VALIDATION_RULES.MIN_HOURS_PAST}h to ${GAME_VALIDATION_RULES.MAX_HOURS_FUTURE}h)` };
+    }
+
+    const gameHour = gameTime.getUTCHours(); // Use UTCHours for consistency with UTC-based date string logic if needed
+    if (gameHour < GAME_VALIDATION_RULES.MIN_HOUR_OF_DAY || gameHour > GAME_VALIDATION_RULES.MAX_HOUR_OF_DAY) {
+        return { valid: false, reason: `Invalid game hour (${gameHour})` };
     }
 
     console.log('✅ VALID GAME:', {
         game: `${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`,
         time: gameTime.toLocaleTimeString(),
-        minutesFromNow: Math.round((gameTime - now) / (1000 * 60))
+        hoursFromNow: Math.round(diffHours * 10) / 10
     });
 
     return { valid: true };
@@ -2312,7 +2242,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
             }
             
             setTodaysMatchup(matchup); // Set matchup once ready
-            setIsInitialized(true); // Mark as initialized after first successful load
+            
         } catch (error) {
             console.error('🚨 Complete matchup loading failure:', error);
             // Ultimate fallback
@@ -2326,9 +2256,9 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 status: 'upcoming'
             };
             setTodaysMatchup(fallbackMatchup);
-            setIsInitialized(true); // Mark as initialized even with fallback
         } finally {
             setMatchupLoading(false); // Set loading false LAST
+            setIsInitialized(true); // Always set true here after load or fallback
         }
     };
 
@@ -2348,31 +2278,14 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         const [gameTime, setGameTime] = useState(null);
 
         useEffect(() => {
-            if (!startTime) {
-                console.warn('GameTimeDisplay: No startTime provided');
+            const parsedTime = parseGameTime(startTime);
+            if (!parsedTime) {
+                console.warn('GameTimeDisplay: No valid startTime provided, cannot display time.');
                 setTimeLeft('N/A');
                 return;
             }
-
-            console.log('GameTimeDisplay: Raw startTime:', startTime, 'Type:', typeof startTime);
-
-            // Robust date parsing
-            let parsedTime = startTime instanceof Date ? startTime : new Date(startTime);
-
-            if (isNaN(parsedTime.getTime())) {
-                console.warn('GameTimeDisplay: Invalid startTime, trying fallback parsing');
-                // Try replacing space with T for non-standard formats
-                if (typeof startTime === 'string' && startTime.includes(' ')) {
-                    parsedTime = new Date(startTime.replace(' ', 'T'));
-                }
-            }
-
-            if (isNaN(parsedTime.getTime())) {
-                console.warn('GameTimeDisplay: All parsing failed, using fallback');
-                parsedTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
-            }
-
-            console.log('GameTimeDisplay: Final gameTime:', parsedTime.toString());
+            
+            console.log('GameTimeDisplay: Final gameTime (from parseGameTime):', parsedTime.toString());
             setGameTime(parsedTime);
 
             // Timer update logic, now passing updates to setTimeLeft prop
@@ -2427,55 +2340,14 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         return;
     }
 
-    console.log('Timer: Raw startTime:', todaysMatchup.startTime);
-    console.log('Timer: StartTime type:', typeof todaysMatchup.startTime);
-
-    // ROBUST DATE PARSING - try multiple approaches
-    let gameTime = null;
-
-    // Approach 1: If it's already a Date object
-    if (todaysMatchup.startTime instanceof Date) {
-        if (!isNaN(todaysMatchup.startTime.getTime())) {
-            gameTime = todaysMatchup.startTime;
-            console.log('Timer: Using existing Date object');
-        }
-    }
-
-    // Approach 2: Try basic new Date()
+    const gameTime = parseGameTime(todaysMatchup.startTime);
     if (!gameTime) {
-        try {
-            const basicDate = new Date(todaysMatchup.startTime);
-            if (!isNaN(basicDate.getTime())) {
-                gameTime = basicDate;
-                console.log('Timer: Basic new Date() worked');
-            }
-        } catch (e) {
-            console.log('Timer: Basic new Date() failed:', e);
-        }
+        console.error('Timer: Failed to parse game time, cannot set up timer.');
+        setTimeLeft('Timer error');
+        return;
     }
 
-    // Approach 3: Try Date.parse()
-    if (!gameTime) {
-        try {
-            const timestamp = Date.parse(todaysMatchup.startTime);
-            if (!isNaN(timestamp)) {
-                gameTime = new Date(timestamp);
-                console.log('Timer: Date.parse() worked');
-            }
-        } catch (e) {
-            console.log('Timer: Date.parse() failed:', e);
-        }
-    }
-
-    // Approach 4: Emergency fallback
-    if (!gameTime) {
-        console.error('Timer: All date parsing failed, using fallback');
-        // Create a game time 2 hours from now
-        gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-        setTimeLeft('Fallback time used');
-    }
-
-    console.log('Timer: Final gameTime:', gameTime);
+    console.log('Timer: Final gameTime (from parseGameTime):', gameTime);
 
     let animationFrame;
     let lastUpdate = 0;
@@ -2569,47 +2441,6 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
 }, [todaysMatchup?.startTime]); // Depend on startTime specifically
-
-// Mobile Timer Enhancement - Remove this as per user's prompt (simplification)
-/*
-useEffect(() => {
-    // Mobile-specific timer fixes
-    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
-    
-    if (isMobile && todaysMatchup?.startTime) {
-        console.log('📱 Setting up mobile timer enhancements...');
-        
-        // Mobile browsers pause timers when app goes to background
-        let isAppVisible = true;
-        
-        const handleVisibilityChange = () => {
-            isAppVisible = !document.hidden;
-            console.log('📱 App visibility changed:', isAppVisible ? 'visible' : 'hidden');
-            
-            if (isAppVisible) {
-                // App became visible again - force timer update
-                console.log('📱 App visible again, forcing timer refresh...');
-                // The main timer useEffect will handle the update
-            }
-        };
-        
-        const handlePageShow = () => {
-            console.log('📱 Page show event - mobile timer refresh');
-            isAppVisible = true;
-        };
-        
-        // Mobile-specific event listeners
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('pageshow', handlePageShow);
-        
-        // Cleanup
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('pageshow', handlePageShow);
-        };
-    }
-}, [todaysMatchup?.startTime]);
-*/
 
 
     /**
