@@ -227,12 +227,13 @@ const getDisplayName = (user) => {
 
 /**
  * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
- * This helps avoid timezone issues with toDateString().
+ * IMPORTANT: This now uses UTC date components for global consistency.
  * @returns {string} Date string in 'YYYY-MM-DD' format.
  */
 const getTodayDateString = () => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    // Use UTC date components to ensure consistency across timezones for the "day"
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
 };
 
 /**
@@ -1070,9 +1071,9 @@ const selectDailyGame = (validGames) => {
         return bTime - aTime;
     });
 
-    // Use deterministic selection based on date
-    const today = getTodayDateString(); // Use the new reliable date string
-    const seed = today.split('-').reduce((acc, part) => acc + parseInt(part), 0);
+    // Use deterministic selection based on UTC date for global consistency
+    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
+    const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const selectedIndex = seed % sortedGames.length;
     const selectedGame = sortedGames[selectedIndex];
 
@@ -1330,8 +1331,9 @@ const generateSeasonalSimulation = (date) => {
     // If no matchups for current sport, use all matchups
     const availableMatchups = seasonalMatchups.length > 0 ? seasonalMatchups : matchupPool;
 
-    // Use date as seed for consistent daily matchups
-    const seed = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+    // Use UTC date as seed for consistent daily matchups globally
+    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
+    const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
     const dailyMatchupIndex = seed % availableMatchups.length;
     const selectedMatchup = availableMatchups[dailyMatchupIndex];
 
@@ -2235,7 +2237,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const { playSound } = useSound(userState.soundEnabled);
     const { addNotification, notifications, dismissNotification } = useNotifications();
 
-    const today = getTodayDateString(); // Use the new reliable date string
+    const today = getTodayDateString(); // Use the new reliable date string (UTC-based)
     const currentWeekMonday = getMondayOfCurrentWeek();
 
     const [todaysMatchup, setTodaysMatchup] = useState(null);
@@ -2284,13 +2286,17 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         setMatchupLoading(true);
 
         try {
+            // Log current date strings for debugging
+            console.log('DEBUG: UserState Last Pick Date (from storage):', userState.lastPickDate);
+            console.log('DEBUG: Today String (UTC based):', today);
             const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
+            console.log('DEBUG: Needs New Matchup:', needsNewMatchup);
 
             let matchup = null;
             if (needsNewMatchup) {
                 console.log('🔄 Loading new daily matchup...');
                 try {
-                    matchup = await generateEnhancedDailyMatchup(new Date());
+                    matchup = await generateEnhancedDailyMatchup(new Date()); // Passing current date
                     console.log('✅ Successfully loaded ESPN matchup:', {
                         game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`,
                         sport: matchup.sport,
@@ -2298,10 +2304,11 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     });
                 } catch (espnError) {
                     console.error('🚨 ESPN API failed, using simulation:', espnError.message);
-                    matchup = generateSeasonalSimulation(new Date());
+                    matchup = generateSeasonalSimulation(new Date()); // Passing current date
                 }
             } else {
                 console.log('📅 Regenerating today\'s matchup...');
+                // Ensure to pass a Date object derived from the stored ISO string for consistent seeding
                 try {
                     matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
                 } catch (espnError) {
@@ -2310,7 +2317,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 }
             }
             
-            setTodaysMatchup(matchup);
+            setTodaysMatchup(matchup); // This triggers re-render
         } catch (error) {
             console.error('🚨 Complete matchup loading failure:', error);
             // Ultimate fallback
@@ -2394,7 +2401,7 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
         const isToday = gameLocalDate.getTime() === nowLocalDate.getTime();
         const isTomorrow = gameLocalDate.getTime() === tomorrowLocalDate.getTime();
 
-        // Safe formatting with fallbacks
+        // Safe formatting with explicit locale and options for consistency
         let dayText = 'Unknown';
         let timeText = 'Unknown';
 
@@ -2404,20 +2411,19 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
             } else if (isTomorrow) {
                 dayText = 'Tomorrow';
             } else {
-                const dateFormatter = new Intl.DateTimeFormat('en-US', {
+                dayText = gameTime.toLocaleDateString('en-US', {
                     weekday: 'short',
                     month: 'short',
                     day: 'numeric'
                 });
-                dayText = dateFormatter.format(gameTime);
             }
 
-            const timeFormatter = new Intl.DateTimeFormat('en-US', {
+            timeText = gameTime.toLocaleTimeString('en-US', {
                 hour: 'numeric',
                 minute: '2-digit',
-                timeZoneName: 'short'
+                hour12: true // Ensures AM/PM format
+                // Removed timeZoneName for simplicity, often causes long strings or issues
             });
-            timeText = timeFormatter.format(gameTime);
 
         } catch (formatError) {
             console.error('Date formatting error:', formatError);
@@ -3206,7 +3212,7 @@ useEffect(() => {
                     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
                     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
                     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    --shadow-xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
+                    --shadow-xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
                     
                     /* Transitions */
                     --transition-fast: 150ms ease-out;
@@ -3739,7 +3745,7 @@ useEffect(() => {
                             `}
                             aria-label={`Toggle sound effects, currently ${userState.soundEnabled ? 'on' : 'off'}`}
                         >
-                            {userState.soundEnabled ? '🔊 Sound' : '🔇 Muted'}
+                            🔊 Sound
                         </button>
                     </div>
 
