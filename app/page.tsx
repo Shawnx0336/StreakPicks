@@ -169,7 +169,7 @@ const useWhop = () => {
  * @param {string} str - Input string.
  * @returns {number} Numeric hash.
  */
-const simpleHash = (str) => {
+const simpleHash = (str: string | null | undefined) => {
     let hash = 0;
     if (str === null || str === undefined) { // Handle null or undefined string input
         str = '';
@@ -187,7 +187,7 @@ const simpleHash = (str) => {
  * @param {string} userId - The user's unique ID.
  * @returns {string} Generated display name.
  */
-const generateDisplayName = (userId) => {
+const generateDisplayName = (userId: string) => {
     const adjectives = ['Fire', 'Ice', 'Lightning', 'Storm', 'Steel', 'Shadow', 'Blazing', 'Mighty', 'Swift', 'Golden', 'Mystic', 'Crimson', 'Azure', 'Jade', 'Silver', 'Bronze', 'Diamond', 'Emerald', 'Vapor', 'Echo'];
     const nouns = ['Picker', 'Prophet', 'Analyst', 'Streak', 'Eagle', 'Tiger', 'Champion', 'Master', 'Wizard', 'Legend', 'Striker', 'Scout', 'Oracle', 'Hunter', 'Guardian', 'Titan', 'Specter', 'Vanguard', 'Pioneer', 'Maverick'];
 
@@ -218,7 +218,7 @@ const getMondayOfCurrentWeek = () => {
  * @param {Object} user - Whop user object
  * @returns {string} Display name to use
  */
-const getDisplayName = (user) => {
+const getDisplayName = (user: any) => {
     // Always use Whop account information
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
