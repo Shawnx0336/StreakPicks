@@ -2217,7 +2217,22 @@ const EmergencyFallback = () => (
 
 // --- Main App Component ---
 const App = ({ user }) => { // Accept user prop from Whop wrapper
-    const userId = user?.id || 'anonymous'; // Use Whop user ID for persistence
+    // If user is null, the app can't function. Display a message or redirect.
+    if (!user) {
+        return (
+            <div className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center justify-center text-center">
+                <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
+                <p className="text-lg text-text-secondary mb-6">
+                    Please ensure you are logged into Whop and have access to this application.
+                </p>
+                <p className="text-sm text-text-secondary">
+                    If you are having trouble, try refreshing the page or contacting support.
+                </p>
+            </div>
+        );
+    }
+
+    const userId = user.id; // Use Whop user ID for persistence
 
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     // Share analytics state
@@ -3095,7 +3110,8 @@ useEffect(() => {
     }
     
     // ===== FIX 4: SAFE MATCHUP DATA VALIDATION (Integrated into render logic) =====
-    const validation = validateMatchupData(todaysMatchup);
+    // Ensure todaysMatchup is not null before validating its properties.
+    const validation = todaysMatchup ? validateMatchupData(todaysMatchup) : { isValid: false, error: 'Matchup data missing' };
 
 
     // Enhanced Header Component
@@ -3215,8 +3231,7 @@ useEffect(() => {
                     /* Shadows */
                     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
                     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    --shadow-xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
+                    --shadow-lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';
                     
                     /* Transitions */
                     --transition-fast: 150ms ease-out;
@@ -3616,36 +3631,46 @@ useEffect(() => {
                 {/* Today's Matchup Card */}
                 <div className="matchup-card mb-6"> {/* Applied matchup-card styling */}
                     <div className="flex justify-between items-center mb-4 px-6 pt-6"> {/* Added padding to align with matchup-card */}
-                        <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
-                            {todaysMatchup.sport}
-                        </span>
+                        {todaysMatchup?.sport && ( // Ensure sport is available
+                            <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
+                                {todaysMatchup.sport}
+                            </span>
+                        )}
                         {/* Optional: Show data source */}
                         <span className="text-xs text-text-secondary">
-                            {todaysMatchup.id?.includes('emergency-fallback') ? '🎮 Sim' : '📡 Live'}
+                            {todaysMatchup?.id?.includes('emergency-fallback') ? '🎮 Sim' : '📡 Live'}
                         </span>
-                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
+                        {todaysMatchup?.venue && ( // Ensure venue is available
+                            <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
+                        )}
                     </div>
 
                     {/* Team vs Team using the new team-selection-container grid */}
-                    <div className="team-selection-container">
-                        <EnhancedTeamCard
-                            team={todaysMatchup.homeTeam}
-                            isSelected={userState.todaysPick?.selectedTeam === 'home'}
-                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
-                            onClick={() => handlePick('home')}
-                            disabled={hasPickedToday || gameStarted}
-                        />
+                    {todaysMatchup?.homeTeam && todaysMatchup?.awayTeam ? ( // Ensure both teams are available
+                        <div className="team-selection-container">
+                            <EnhancedTeamCard
+                                team={todaysMatchup.homeTeam}
+                                isSelected={userState.todaysPick?.selectedTeam === 'home'}
+                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
+                                onClick={() => handlePick('home')}
+                                disabled={hasPickedToday || gameStarted}
+                            />
 
-                        <div className="vs-divider">VS</div>
+                            <div className="vs-divider">VS</div>
 
-                        <EnhancedTeamCard
-                            team={todaysMatchup.awayTeam}
-                            isSelected={userState.todaysPick?.selectedTeam === 'away'}
-                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
-                            onClick={() => handlePick('away')}
-                            disabled={hasPickedToday || gameStarted}
-                        />
-                    </div>
+                            <EnhancedTeamCard
+                                team={todaysMatchup.awayTeam}
+                                isSelected={userState.todaysPick?.selectedTeam === 'away'}
+                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
+                                onClick={() => handlePick('away')}
+                                disabled={hasPickedToday || gameStarted}
+                            />
+                        </div>
+                    ) : (
+                        <div className="text-center text-text-secondary p-4">
+                            Matchup data not fully loaded or available.
+                        </div>
+                    )}
 
                     {/* Game Time Display - UPDATED */}
                     <div className="text-center mb-6 px-6"> {/* Added padding to align */}
@@ -3670,7 +3695,7 @@ useEffect(() => {
                         </p>
 
                         {/* Debug info (remove after testing) */}
-                        {process.env.NODE_ENV === 'development' && (
+                        {process.env.NODE_ENV === 'development' && todaysMatchup?.startTime && (
                             <div className="mt-2 text-xs text-text-secondary">
                                 <p>Debug: {new Date(todaysMatchup.startTime).toLocaleString()}</p>
                             </div>
@@ -3678,11 +3703,11 @@ useEffect(() => {
                     </div>
 
                     {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
-                    {(hasPickedToday || gameStarted) && (
+                    {(hasPickedToday || gameStarted) && todaysMatchup?.homeTeam && todaysMatchup?.awayTeam && (
                         <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
                             <p className="font-semibold text-text-primary">
                                 {hasPickedToday ?
-                                    `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
+                                    `✅ You picked: ${userState.todaysPick?.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
                                     '🔒 Game has started!'
                                 }
                             </p>
@@ -3859,35 +3884,18 @@ export default function Page() {
                     console.log('✅ Found real Whop user:', whopUser);
                     setUser(whopUser);
                     setIsWhopUser(true);
-                    setLoading(false);
-                    return;
+                } else {
+                    console.log('🚫 No Whop user found, and not allowing dev mode fallback.');
+                    // If no real Whop user, set user to null and indicate no Whop user
+                    setUser(null);
+                    setIsWhopUser(false); // Still false, so the banner will show
                 }
-
-                console.log('⚠️ No Whop user found, checking for dev mode...');
-                
-                // If we're in development or testing, use test user
-                const testUser = {
-                    id: 'test_user_' + Date.now(),
-                    username: 'TestPlayer' + Math.floor(Math.random() * 1000),
-                    email: 'test@streakpicks.com',
-                    name: 'Test Player'
-                };
-                
-                console.log('🧪 Using test user for development');
-                setUser(testUser);
-                setIsWhopUser(false);
 
             } catch (error) {
                 console.error('❌ Error getting user:', error);
                 
-                // Fallback to test user on any error
-                const testUser = {
-                    id: 'fallback_user_' + Date.now(),
-                    username: 'FallbackPlayer',
-                    email: 'fallback@streakpicks.com',
-                    name: 'Fallback Player'
-                };
-                setUser(testUser);
+                // Fallback to null user on any error, no test user created.
+                setUser(null);
                 setIsWhopUser(false);
             } finally {
                 setLoading(false);
@@ -3908,13 +3916,12 @@ export default function Page() {
         );
     }
 
-    // Show a banner if using test user
+    // Show a banner if using test user (now only if real Whop user isn't found)
     return (
         <div>
             {!isWhopUser && (
                 <div className="bg-yellow-100 border-b border-yellow-300 p-2 text-center text-sm">
-                    🧪 <strong>Development Mode:</strong> Using test user. 
-                    Access through Whop community for real authentication.
+                    🧪 <strong>Development Mode:</strong> Not connected to Whop. Please log in via Whop for full features.
                 </div>
             )}
             <App user={user} />
