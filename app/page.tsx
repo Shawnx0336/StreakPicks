@@ -1098,7 +1098,6 @@ const parseESPNGameData = (event, sport) => {
         const competition = event.competitions[0];
         const competitors = competition.competitors;
 
-        // Find home and away teams
         const homeTeamRaw = competitors.find(c => c.homeAway === 'home');
         const awayTeamRaw = competitors.find(c => c.homeAway === 'away');
 
@@ -1108,19 +1107,34 @@ const parseESPNGameData = (event, sport) => {
 
         const sportEmoji = getSportEmoji(sport);
 
-        // EMERGENCY FIX: Just use basic new Date() - this was working before
+        // ULTRA SIMPLE: Just use basic new Date() like desktop
+        console.log('🎯 Raw ESPN date:', event.date);
         let gameStartTime;
+        
         try {
+            // Method 1: Direct - what desktop does
             gameStartTime = new Date(event.date);
-            // Basic validation
-            if (isNaN(gameStartTime.getTime())) {
-                throw new Error('Invalid date');
+            console.log('📅 Direct parsing result:', gameStartTime.toString());
+            
+            // If that fails, try with T replacement
+            if (isNaN(gameStartTime.getTime()) && typeof event.date === 'string' && event.date.includes(' ')) {
+                console.log('🔄 Trying T replacement...');
+                gameStartTime = new Date(event.date.replace(' ', 'T'));
+                console.log('📅 T replacement result:', gameStartTime.toString());
             }
-        } catch (dateError) {
-            console.error('Date parsing failed for:', event.date, dateError);
-            // Ultra fallback - create a date 2 hours from now
-            gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            
+            // If still invalid, create fallback
+            if (isNaN(gameStartTime.getTime())) {
+                console.warn('⚠️ Date parsing failed, using fallback');
+                gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
+            }
+            
+        } catch (error) {
+            console.error('Date parsing error:', error);
+            gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
         }
+
+        console.log('✅ Final game time:', gameStartTime.toString());
 
         return {
             id: event.id,
@@ -1144,7 +1158,7 @@ const parseESPNGameData = (event, sport) => {
             },
             sport: sport,
             venue: competition.venue?.fullName || `${sport} Stadium`,
-            startTime: gameStartTime, // Now guaranteed to be a valid Date
+            startTime: gameStartTime,
             status: event.status?.type?.detail || 'upcoming'
         };
 
