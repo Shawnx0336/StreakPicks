@@ -5,10 +5,450 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "@whop/react/styles.css" layer(frosted_ui);
 
-@config '../tailwind.config.ts';
+/* This import needs to be handled by the build system or implicitly known by Tailwind */
+/* @config '../tailwind.config.ts'; */
 
+/* --- PROFESSIONAL DESIGN SYSTEM: Production-grade variables and base styles --- */
+
+/* Root variables for light mode (default) */
+:root {
+    /* Color Palette */
+    --bg-primary: #ffffff; /* Primary background color */
+    --bg-secondary: #f8fafc; /* Secondary background color (e.g., card backgrounds) */
+    --bg-tertiary: #e2e8f0; /* Tertiary background color (e.g., borders, subtle accents) */
+    --bg-quaternary: #cbd5e1; /* Quaternary background color (e.g., darker shades, disabled states) */
+
+    /* Text Colors */
+    --text-primary: #1e293b; /* Primary text color (darker for light mode) */
+    --text-secondary: #64748b; /* Secondary text color (lighter for light mode) */
+
+    /* Semantic Accent Colors */
+    --accent-info: #3b82f6; /* Information/Brand Blue */
+    --accent-success: #10b981; /* Success/Positive Green */
+    --accent-error: #ef4444; /* Error/Negative Red */
+    --accent-warning: #f59e0b; /* Warning/Caution Yellow-Orange */
+
+    /* Specific Game-related Accents */
+    --accent-win: #22c55e; /* Bright green for correct picks/wins */
+    --accent-loss: #ef4444; /* Bright red for wrong picks/losses */
+
+    /* Typography */
+    --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+
+    /* Spacing Scale */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+
+    /* Border Radius Scale */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --radius-2xl: 1.5rem;
+
+    /* Box Shadows */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+    /* Transitions */
+    --transition-fast: 150ms ease-out;
+    --transition-normal: 250ms ease-out;
+    --transition-slow: 400ms ease-out;
+}
+
+/* Dark mode overrides */
+.dark {
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #1a1a1a;
+    --bg-tertiary: #2a2a2a;
+    --bg-quaternary: #404040;
+
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0a0;
+}
+
+/* Base body styles from user request */
 body {
-	background: var(--background);
-	color: var(--foreground);
-	font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg-primary); /* Use CSS variable for background */
+    color: var(--text-primary);    /* Use CSS variable for text color */
+    font-family: var(--font-primary); /* Use CSS variable for font family */
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden; /* Prevent horizontal scroll */
+    transition: background var(--transition-normal), color var(--transition-normal); /* Smooth theme transition */
+}
+
+/* --- Component-specific styles (can be integrated here or in components layer if desired) --- */
+
+/* Animations */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Applied to elements needing these animations */
+.animate-fadeInUp { animation: fadeInUp 0.5s ease-out forwards; }
+.animate-slideInRight { animation: slideInRight 0.5s ease-out forwards; }
+
+/* Matchup Card Styling */
+.matchup-card {
+    background: linear-gradient(135deg,
+        var(--bg-secondary) 0%,
+        color-mix(in srgb, var(--accent-info) 5%, var(--bg-secondary)) 100%
+    );
+    border: 1px solid color-mix(in srgb, var(--accent-info) 10%, transparent);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(20px); /* Frosted glass effect */
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition-normal);
+}
+
+.matchup-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-info), var(--accent-success), var(--accent-warning));
+    opacity: 0.6;
+}
+
+/* Team Selection Container */
+.team-selection-container {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr; /* Two team cards and a VS divider */
+    gap: var(--space-lg);
+    align-items: stretch;
+    width: 100%;
+    max-width: 400px; /* Constrain width for better mobile experience */
+    margin: 0 auto;
+    padding: var(--space-lg);
+}
+
+/* Individual Team Card */
+.team-card {
+    min-height: 160px; /* Ensure consistent height */
+    width: 100%;
+    aspect-ratio: 3/4; /* Maintain consistent proportions */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+
+    background: var(--bg-secondary);
+    border: 2px solid var(--bg-tertiary);
+    border-radius: var(--radius-xl);
+    padding: var(--space-lg);
+    position: relative;
+    overflow: hidden;
+
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    transform: scale(1);
+    outline: none; /* Remove default outline */
+}
+
+.team-card:focus-visible {
+    box-shadow: 0 0 0 2px var(--accent-info), 0 0 0 4px var(--accent-info); /* Accessibility highlight */
+    outline: none;
+}
+
+.team-card:hover:not(.disabled) {
+    transform: translateY(-2px) scale(1.02);
+    border-color: var(--team-primary); /* Uses custom property from JS */
+    box-shadow:
+        var(--shadow-xl),
+        0 0 20px color-mix(in srgb, var(--team-primary) 30%, transparent);
+}
+
+.team-card.selected {
+    border-color: var(--team-primary);
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--team-primary) 10%, var(--bg-secondary)),
+        var(--bg-secondary)
+    );
+    transform: scale(1.02);
+    animation: team-select 0.3s ease-out; /* Apply animation on selection */
+}
+
+.team-card.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none; /* Remove hover transform when disabled */
+}
+
+.team-card .team-logo {
+    font-size: 3.5rem; /* Adjusted for better fit on card */
+}
+
+.team-card .team-name {
+    font-size: 1.125rem; /* Equivalent to text-lg */
+    font-weight: 700;    /* Equivalent to font-bold */
+}
+
+.team-card .team-name-full {
+    font-size: 0.875rem; /* Equivalent to text-sm */
+    color: var(--text-secondary);
+}
+
+.team-card .color-accent {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 6px; /* Accent bar height */
+    opacity: 0.7;
+}
+
+.vs-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-radius: 50%;
+    width: 60px; /* Fixed size for circle */
+    height: 60px; /* Fixed size for circle */
+    box-shadow: var(--shadow-md);
+    flex-shrink: 0; /* Prevent shrinking in flex container */
+}
+
+/* Animations for Team Cards */
+@keyframes team-select {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1.02); }
+}
+
+/* Streak Display Animations */
+@keyframes celebrate {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+@keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.streak-number.celebrating {
+    animation: celebrate 1s ease-in-out;
+    color: var(--accent-win); /* Highlight color when celebrating */
+}
+
+.streak-flame {
+    animation: flicker 1.5s infinite;
+}
+
+/* Leaderboard Modal Styles */
+.leaderboard-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-md);
+}
+
+.leaderboard-content {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-2xl);
+    max-width: 500px;
+    width: 100%;
+    max-height: 90vh; /* Adjusted for better fit on smaller screens */
+    overflow-y: auto;
+    border: 2px solid var(--bg-tertiary);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5); /* Stronger shadow */
+}
+
+.leaderboard-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--bg-tertiary);
+}
+
+.leaderboard-tab {
+    flex: 1;
+    padding: var(--space-md);
+    text-align: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: var(--text-secondary);
+    font-weight: 600; /* font-semibold */
+}
+
+.leaderboard-tab:hover {
+    background: var(--bg-tertiary);
+}
+
+.leaderboard-tab.active {
+    background: var(--accent-info);
+    color: white;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0; /* Rounded corners for active tab */
+}
+
+.leaderboard-tab:first-child.active {
+    border-top-left-radius: var(--radius-xl);
+}
+.leaderboard-tab:last-child.active {
+    border-top-right-radius: var(--radius-xl);
+}
+
+
+.leaderboard-entry {
+    display: flex;
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: 1px solid var(--bg-tertiary);
+    transition: background var(--transition-fast);
+}
+
+.leaderboard-entry:last-child {
+    border-bottom: none;
+}
+
+.leaderboard-entry:hover {
+    background: var(--bg-tertiary);
+}
+
+.leaderboard-entry.current-user {
+    background: color-mix(in srgb, var(--accent-info) 20%, transparent); /* Lighter background for current user */
+    border-left: 4px solid var(--accent-info);
+}
+
+/* Rank Badge Styles */
+.rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 20px; /* Pill shape */
+    font-weight: bold;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    min-width: 90px;
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-normal);
+}
+
+.rank-badge.top-10 {
+    background: linear-gradient(135deg, #FFD700, #FFA500); /* Gold */
+    color: #1a1a1a; /* Dark text on gold */
+    animation: pulse-gold 2s infinite;
+}
+
+.rank-badge.top-50 {
+    background: linear-gradient(135deg, #C0C0C0, #A0A0A0); /* Silver */
+    color: #1a1a1a;
+}
+
+.rank-badge.top-100 {
+    background: linear-gradient(135deg, #CD7F32, #8B4513); /* Bronze */
+    color: #fff;
+}
+.rank-badge.standard {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+@keyframes pulse-gold {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
+    70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
+}
+
+/* Loading Spinner */
+.loader {
+    border-top-color: var(--accent-info);
+    animation: spin 1.2s linear infinite;
+}
+
+/* Share Modal Styles */
+.share-modal-container {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: var(--space-md);
+}
+
+.share-modal-content {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-2xl);
+    padding: var(--space-lg);
+    max-width: 480px;
+    width: 100%;
+    box-shadow: var(--shadow-xl);
+    border: 2px solid var(--bg-tertiary);
+}
+
+/* Mobile Optimizations */
+@media (max-width: 640px) {
+    .team-selection-container {
+        grid-template-columns: 1fr 50px 1fr; /* Adjust for smaller screen */
+        gap: var(--space-md);
+        padding: var(--space-md);
+    }
+
+    .team-card {
+        min-height: 140px; /* Smaller cards on mobile */
+        padding: var(--space-md);
+    }
+
+    .team-card .team-logo {
+        font-size: 3rem; /* Smaller logo */
+    }
+
+    .team-card .team-name {
+        font-size: 1rem; /* Smaller text */
+    }
+
+    .vs-divider {
+        width: 50px;
+        height: 50px;
+        font-size: 1rem;
+    }
+
+    .leaderboard-tab {
+        padding: var(--space-sm);
+        font-size: 0.875rem;
+    }
+
+    .leaderboard-entry {
+        padding: var(--space-xs) var(--space-md);
+    }
+
+    .leaderboard-entry span {
+        font-size: 0.875rem;
+    }
 }
