@@ -1194,10 +1194,9 @@ const parseESPNGameData = (event, sport) => {
 // MANDATORY: Robust ESPN API with multiple fallback layers
 const fetchESPNData = async (retryCount = 0) => {
     const MAX_RETRIES = 2;
-    const TIMEOUT_MS = 12000; // Increased from 8000 for mobile
+    const TIMEOUT_MS = 12000;
 
     try {
-        // Mobile detection and logging
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         console.log(`🔄 ESPN API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}`);
         
@@ -1205,84 +1204,37 @@ const fetchESPNData = async (retryCount = 0) => {
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
         const currentSport = getCurrentSport();
-        const fallbackSports = ['NBA', 'NFL', 'MLB', 'NHL'].filter(s => s !== currentSport);
         const currentDate = new Date();
+        const apiUrl = getSportEndpoint(currentSport, currentDate);
 
-        let response, data;
-        
-        try {
-            const apiUrl = getSportEndpoint(currentSport, currentDate);
-            console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} fetching games for ${currentDate.toLocaleDateString()} (${currentDate.toISOString()}): ${apiUrl}`);
-            
-            response = await fetch(apiUrl, {
-                signal: controller.signal,
-                headers: {
-                    'Accept': 'application/json',
-                    'User-Agent': isMobile ? 'StreakPickem/1.0 (Mobile)' : 'StreakPickem/1.0',
-                    'Cache-Control': 'no-cache', // CRITICAL: Prevent mobile caching
-                    'Pragma': 'no-cache' // Additional cache prevention
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status} for ${currentSport}`);
+        const response = await fetch(apiUrl, {
+            signal: controller.signal,
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
             }
-            
-            data = await response.json();
-            
-            if (data.events && data.events.length > 0) {
-                console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} got ${data.events.length} events from ${currentSport} for ${currentDate.toLocaleDateString()}`);
-                
-                // MOBILE DEBUG: Log first event details
-                if (isMobile && data.events[0]) {
-                    console.log('📱 First event sample:', {
-                        name: data.events[0].name,
-                        shortName: data.events[0].shortName,
-                        date: data.events[0].date,
-                        status: data.events[0].status?.type?.name
-                    });
-                }
-            } else {
-                throw new Error(`No events in ${currentSport} for ${currentDate.toLocaleDateString()}`);
-            }
-        } catch (sportError) {
-            console.warn(`⚠️ ${currentSport} failed on ${isMobile ? 'Mobile' : 'Desktop'}:`, sportError.message);
-            
-            // Try fallback sports with same mobile logging
-            for (const sport of fallbackSports) {
-                try {
-                    const apiUrl = getSportEndpoint(sport, currentDate);
-                    console.log(`🔄 ${isMobile ? 'Mobile' : 'Desktop'} trying fallback sport: ${sport}`);
-                    
-                    response = await fetch(apiUrl, {
-                        signal: controller.signal,
-                        headers: {
-                            'Accept': 'application/json',
-                            'User-Agent': isMobile ? 'StreakPickem/1.0 (Mobile)' : 'StreakPickem/1.0',
-                            'Cache-Control': 'no-cache',
-                            'Pragma': 'no-cache'
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        data = await response.json();
-                        if (data.events && data.events.length > 0) {
-                            console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} got ${data.events.length} events from fallback ${sport}`);
-                            break;
-                        }
-                    }
-                } catch (fallbackError) {
-                    console.warn(`⚠️ Fallback ${sport} failed on ${isMobile ? 'Mobile' : 'Desktop'}:`, fallbackError.message);
-                    continue;
-                }
-            }
-            
-            if (!data || !data.events || data.events.length === 0) {
-                throw new Error('All sports APIs failed');
-            }
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${currentSport}`);
+        const data = await response.json();
+
+        if (!data.events || data.events.length === 0) throw new Error(`No events in ${currentSport}`);
+
+        console.log(`✅ Got ${data.events.length} events from ${currentSport}`);
+        return selectDailyGame(data.events.map(event => parseESPNGameData(event, currentSport)));
+    } catch (error) {
+        console.error(`🚨 ESPN API Error (Attempt ${retryCount + 1}) on ${isMobile ? 'Mobile' : 'Desktop'}:`, error.message);
+        if (retryCount < MAX_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+            return fetchESPNData(retryCount + 1);
         }
-
+        console.error(`🚨 ESPN API COMPLETELY FAILED - Using emergency fallback`);
+        throw error;
+    } finally {
         clearTimeout(timeoutId);
+    }
+};
 
         // Enhanced game processing with mobile logging
         console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} processing ${data.events.length} raw events`);
@@ -2318,22 +2270,13 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     // Load today's matchup (real or simulated)
    // Load today's matchup (real or simulated)
 useEffect(() => {
+    let isMounted = true;
     const loadTodaysMatchup = async () => {
         setMatchupLoading(true);
 
         try {
-            // Mobile debugging
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            if (isMobile) {
-                console.log('📱 MOBILE MATCHUP LOADING DEBUG:');
-                console.log('📱 User Agent:', navigator.userAgent);
-                console.log('📱 Online Status:', navigator.onLine);
-                console.log('📱 Connection:', navigator.connection?.effectiveType || 'unknown');
-                console.log('📱 Current Date:', new Date().toLocaleString());
-                console.log('📱 UTC Date:', new Date().toISOString());
-            }
-
-            // Log current date strings for debugging
+            console.log(`📱 MOBILE MATCHUP LOADING DEBUG: Start at ${new Date().toLocaleString()}`);
             console.log(`DEBUG: UserState Last Pick Date: ${userState.lastPickDate}`);
             console.log(`DEBUG: Today String (UTC): ${today}`);
             const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
@@ -2344,65 +2287,67 @@ useEffect(() => {
                 console.log(`🔄 ${isMobile ? 'Mobile' : 'Desktop'} loading new daily matchup...`);
                 try {
                     matchup = await generateEnhancedDailyMatchup(new Date());
-                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} successfully loaded matchup:`, {
-                        game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`,
-                        sport: matchup.sport,
-                        isReal: !matchup.id.includes('fallback') && !matchup.id.includes('emergency'),
+                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} loaded real matchup:`, {
                         id: matchup.id,
-                        venue: matchup.venue
+                        game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`
                     });
                 } catch (espnError) {
                     console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed:`, espnError.message);
-                    console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} using seasonal simulation fallback`);
+                    console.log(`📊 ${isMobile ? 'Mobile' : 'Desktop'} using seasonal simulation`);
                     matchup = generateSeasonalSimulation(new Date());
                 }
             } else {
-                console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} regenerating today's matchup...`);
+                console.log(`📅 ${isMobile ? 'Mobile' : 'Desktop'} regenerating today’s matchup...`);
                 try {
                     matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
+                    console.log(`✅ ${isMobile ? 'Mobile' : 'Desktop'} regenerated real matchup:`, {
+                        id: matchup.id,
+                        game: `${matchup.homeTeam.name} vs ${matchup.awayTeam.name}`
+                    });
                 } catch (espnError) {
                     console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} ESPN API failed for existing date:`, espnError.message);
                     matchup = generateSeasonalSimulation(new Date(userState.lastPickDate));
                 }
             }
-            
-            // CRITICAL: Log final matchup details for debugging
-            if (isMobile) {
-                console.log('📱 FINAL MATCHUP SET:', {
+
+            if (isMounted && matchup) {
+                console.log(`📱 FINAL MATCHUP SET:`, {
                     id: matchup.id,
                     homeTeam: matchup.homeTeam.name,
                     awayTeam: matchup.awayTeam.name,
-                    sport: matchup.sport,
-                    venue: matchup.venue,
-                    startTime: matchup.startTime,
-                    isEmergencyFallback: matchup.id.includes('emergency-fallback')
+                    startTime: matchup.startTime
                 });
+                setTodaysMatchup(matchup);
             }
-            
-            setTodaysMatchup(matchup);
-            setIsInitialized(true);
         } catch (error) {
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
             console.error(`🚨 ${isMobile ? 'Mobile' : 'Desktop'} complete matchup loading failure:`, error);
-            
-            // Ultimate fallback
-            const fallbackMatchup = {
-                id: 'emergency-fallback',
-                homeTeam: { name: 'Team A', abbr: 'TEA', logo: '🏠', colors: ['505050', '808080'] },
-                awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
-                sport: 'Emergency',
-                venue: 'Fallback Arena',
-                startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                status: 'upcoming'
-            };
-            setTodaysMatchup(fallbackMatchup);
-            setIsInitialized(true);
+            if (isMounted) {
+                const fallbackMatchup = {
+                    id: 'emergency-fallback',
+                    homeTeam: { name: 'Team A', abbr: 'TEA', logo: '🏠', colors: ['505050', '808080'] },
+                    awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
+                    sport: 'Emergency',
+                    venue: 'Fallback Arena',
+                    startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                    status: 'upcoming'
+                };
+                console.log(`📱 FALLBACK APPLIED:`, {
+                    id: fallbackMatchup.id,
+                    game: `${fallbackMatchup.homeTeam.name} vs ${fallbackMatchup.awayTeam.name}`
+                });
+                setTodaysMatchup(fallbackMatchup);
+            }
         } finally {
-            setMatchupLoading(false);
+            if (isMounted) {
+                setMatchupLoading(false);
+                setIsInitialized(true);
+            }
         }
     };
 
     loadTodaysMatchup();
+    return () => { isMounted = false; }; // Cleanup on unmount
 }, [today, userState.lastPickDate]);
 
 
