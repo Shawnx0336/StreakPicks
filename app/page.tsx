@@ -27,7 +27,7 @@ const useWhop = () => {
     const [user, setUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [hasAccess, setHasAccess] = useState(false);
-    const [error, setError] = useState(null);
+    const [error, setError] = useState<Error | null>(null);
     const [isClient, setIsClient] = useState(false);
 
     // Fix hydration issues by ensuring we're on the client
@@ -66,14 +66,12 @@ const useWhop = () => {
                     throw new Error(`Authentication check failed: ${response.status}`);
                 }
             } catch (err) {
-                console.error('Auth check error:', err);
-                setError(err);
-                setUser(null);
-                setIsAuthenticated(false);
-                setHasAccess(false);
-            } finally {
-                setIsLoading(false);
-            }
+    console.error('Auth check error:', err);
+    setError(err instanceof Error ? err : new Error('Authentication failed'));
+    setUser(null);
+    setIsAuthenticated(false);
+    setHasAccess(false);
+}
         };
 
         checkAuthStatus();
