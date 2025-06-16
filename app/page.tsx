@@ -256,120 +256,189 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
-// === CRITICAL FIX 1: ADD MISSING validateMatchupData FUNCTION ===
-/**
- * Validates matchup data to ensure it has all required fields and valid dates.
- * @param {Object} matchup - The matchup object to validate.
- * @returns {{ isValid: boolean, error?: string, gameTime?: Date }} Validation result.
- */
+// 1. REPLACE your parseESPNGameData with this simpler version:
+const parseESPNGameData = (event, sport) => {
+    try {
+        const competition = event.competitions[0];
+        const competitors = competition.competitors;
+
+        const homeTeamRaw = competitors.find(c => c.homeAway === 'home');
+        const awayTeamRaw = competitors.find(c => c.homeAway === 'away');
+
+        if (!homeTeamRaw || !awayTeamRaw || !homeTeamRaw.team || !awayTeamRaw.team) {
+            throw new Error('Could not find complete home/away team data for event: ' + event.id);
+        }
+
+        const sportEmoji = getSportEmoji(sport);
+
+        // ESPN ALREADY SENDS ISO FORMAT! Just use it directly
+        console.log('🎯 ESPN ISO date:', event.date);
+        
+        // Simple validation - ESPN should send valid ISO strings
+        const testParse = Date.parse(event.date);
+        if (isNaN(testParse)) {
+            console.error('❌ Invalid ESPN date format:', event.date);
+            throw new Error('Invalid date from ESPN');
+        }
+
+        // Create Date object directly from ISO string
+        const gameStartTime = new Date(event.date);
+        console.log('✅ Parsed game time:', gameStartTime.toISOString());
+
+        return {
+            id: event.id,
+            homeTeam: {
+                name: homeTeamRaw.team.displayName || homeTeamRaw.team.name,
+                abbr: homeTeamRaw.team.abbreviation,
+                logo: sportEmoji,
+                colors: [
+                    (homeTeamRaw.team.color || '505050'),
+                    (homeTeamRaw.team.alternateColor || '808080')
+                ]
+            },
+            awayTeam: {
+                name: awayTeamRaw.team.displayName || awayTeamRaw.team.name,
+                abbr: awayTeamRaw.team.abbreviation,
+                logo: sportEmoji,
+                colors: [
+                    (awayTeamRaw.team.color || '505050'),
+                    (awayTeamRaw.team.alternateColor || '808080')
+                ]
+            },
+            sport: sport,
+            venue: competition.venue?.fullName || `${sport} Stadium`,
+            startTime: gameStartTime, // Clean Date object from ISO string
+            status: event.status?.type?.detail || 'upcoming'
+        };
+
+    } catch (error) {
+        console.error('❌ Error parsing ESPN game data for event:', event.id, error);
+        throw error;
+    }
+};
+
+// 2. SIMPLIFY your validateMatchupData:
 const validateMatchupData = (matchup) => {
     console.log('🔍 validateMatchupData called with:', matchup);
     
     if (!matchup) {
-        console.log('❌ validateMatchupData: No matchup data');
         return { isValid: false, error: 'No matchup data' };
     }
 
     if (!matchup.startTime) {
-        console.log('❌ validateMatchupData: No start time');
         return { isValid: false, error: 'No start time' };
     }
 
-    // Be more lenient - if startTime exists, consider it valid
+    // Since ESPN sends ISO format, startTime should be a valid Date object
     let gameTime = matchup.startTime;
     
-    // Try to convert to Date if it's not already
+    // If it's not a Date object, something went wrong in parsing
     if (!(gameTime instanceof Date)) {
-        try {
-            gameTime = new Date(gameTime);
-        } catch (e) {
-            console.log('⚠️ validateMatchupData: Date conversion failed, using fallback');
-            gameTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-        }
+        console.error('❌ startTime is not a Date object:', typeof gameTime, gameTime);
+        return { isValid: false, error: 'Invalid date object' };
     }
     
-    // If it's still invalid, use fallback
+    // Check if the Date is valid
     if (isNaN(gameTime.getTime())) {
-        console.log('⚠️ validateMatchupData: Invalid date, using fallback');
-        gameTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+        console.error('❌ Date object is invalid:', gameTime);
+        return { isValid: false, error: 'Invalid date value' };
     }
 
-    console.log('✅ validateMatchupData: Returning valid with gameTime:', gameTime);
+    console.log('✅ validateMatchupData: Valid date object');
     return { isValid: true, gameTime };
 };
 
 // === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
 const universalDateParser = (dateInput) => {
-    if (!dateInput) return null;
-    
-    // FORCE DESKTOP BEHAVIOR - ignore mobile differences
-    console.log('🔧 FORCING desktop behavior for:', dateInput);
-    
-    // If it's already a Date object, return it
-    if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
+    if (!dateInput) {
+        console.log('universalDateParser: No input provided');
+        return null;
     }
     
-    // Convert to string and clean it
-    let dateString = String(dateInput).trim();
+    console.log('universalDateParser input:', dateInput, 'type:', typeof dateInput);
     
-    // DESKTOP LOGIC ONLY - what works on desktop
-    try {
-        // Method 1: Direct parsing (desktop way)
-        let date = new Date(dateString);
+    // If it's already a Date object
+    if (dateInput instanceof Date) {
+        const isValid = !isNaN(dateInput.getTime());
+        console.log('universalDateParser: Date object, valid:', isValid);
+        return isValid ? dateInput : null;
+    }
+    
+    // If it's a timestamp
+    if (typeof dateInput === 'number') {
+        const date = new Date(dateInput);
+        const isValid = !isNaN(date.getTime());
+        console.log('universalDateParser: Number input, valid:', isValid);
+        return isValid ? date : null;
+    }
+    
+    // If it's a string, try multiple parsing strategies
+    const dateString = dateInput.toString().trim();
+    console.log('universalDateParser: Processing string:', dateString);
+    
+    // Strategy 1: Direct parsing (works on most browsers)
+    let date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+        console.log('universalDateParser: Strategy 1 (direct) succeeded');
+        return date;
+    }
+    
+    // Strategy 2: Fix common iOS Safari issues
+    // Replace space with T for ISO format
+    if (dateString.includes(' ') && !dateString.includes('T')) {
+        const isoFixed = dateString.replace(' ', 'T');
+        console.log('universalDateParser: Trying ISO fix:', isoFixed);
+        date = new Date(isoFixed);
         if (!isNaN(date.getTime())) {
-            console.log('✅ Desktop direct parsing worked');
+            console.log('universalDateParser: Strategy 2 (ISO fix) succeeded');
             return date;
         }
-        
-        // Method 2: Fix ESPN format (desktop way)
-        if (dateString.includes(' ') && !dateString.includes('T')) {
-            dateString = dateString.replace(' ', 'T');
-            date = new Date(dateString);
-            if (!isNaN(date.getTime())) {
-                console.log('✅ Desktop T-replacement worked');
-                return date;
-            }
-        }
-        
-        // Method 3: Force manual parsing if needed
-        const match = dateString.match(/(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
-        if (match) {
-            const [, year, month, day, hour, minute, second] = match;
-            // Create date exactly like desktop would
-            date = new Date(year, month - 1, day, hour, minute, second);
-            if (!isNaN(date.getTime())) {
-                console.log('✅ Manual parsing worked');
-                return date;
-            }
-        }
-        
-    } catch (error) {
-        console.error('Date parsing error:', error);
     }
     
-    console.error('❌ All parsing methods failed for:', dateInput);
+    // Strategy 3: Parse ISO-like strings manually
+    const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(?:Z|([+-]\d{2}):?(\d{2}))?$/);
+    if (isoMatch) {
+        console.log('universalDateParser: Trying manual ISO parsing');
+        const [, year, month, day, hour, minute, second, ms = '0', tzHour = '0', tzMin = '0'] = isoMatch;
+        
+        const utcDate = new Date(Date.UTC(
+            parseInt(year), 
+            parseInt(month) - 1, 
+            parseInt(day), 
+            parseInt(hour), 
+            parseInt(minute), 
+            parseInt(second), 
+            parseInt(ms)
+        ));
+        
+        const tzOffset = (parseInt(tzHour) * 60 + parseInt(tzMin)) * 60 * 1000;
+        const finalDate = new Date(utcDate.getTime() - tzOffset);
+        
+        if (!isNaN(finalDate.getTime())) {
+            console.log('universalDateParser: Strategy 3 (manual ISO) succeeded');
+            return finalDate;
+        }
+    }
+    
+    // Strategy 4: Use Date.parse with fallbacks
+    const parseAttempts = [
+        dateString,
+        dateString.replace(/\s+/g, 'T'),
+        dateString.replace(/[^\d\-T:\.Z]/g, ''),
+        dateString + 'Z',
+    ];
+    
+    for (const attempt of parseAttempts) {
+        console.log('universalDateParser: Trying parse attempt:', attempt);
+        const timestamp = Date.parse(attempt);
+        if (!isNaN(timestamp)) {
+            console.log('universalDateParser: Strategy 4 (Date.parse) succeeded with:', attempt);
+            return new Date(timestamp);
+        }
+    }
+    
+    console.error('universalDateParser: All strategies failed for:', dateString);
     return null;
-};
-
-// MOBILE DEBUG HELPER - Add this temporarily to see what's happening
-const mobileDebugInfo = () => {
-    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    
-    console.log('=== MOBILE DEBUG INFO ===');
-    console.log('User Agent:', navigator.userAgent);
-    console.log('Is Mobile:', isMobile);
-    console.log('Is iOS:', isIOS);
-    console.log('Timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
-    console.log('Current time:', new Date().toLocaleString());
-    
-    // Test date parsing
-    const testDate = "2024-06-16 19:35:00";
-    console.log('Test parsing:', testDate);
-    console.log('Direct new Date():', new Date(testDate).toString());
-    console.log('With T replacement:', new Date(testDate.replace(' ', 'T')).toString());
-    console.log('========================');
 };
 
 
@@ -1098,87 +1167,6 @@ const selectDailyGame = (validGames) => {
     });
 
     return selectedGame;
-};
-
-/**
- * Parses ESPN API game data into our app's Matchup format
- * @param {Object} event - Raw event data from ESPN API
- * @param {string} sport - Sport type
- * @returns {Matchup} Formatted matchup object
- */
-const parseESPNGameData = (event, sport) => {
-    try {
-        const competition = event.competitions[0];
-        const competitors = competition.competitors;
-
-        const homeTeamRaw = competitors.find(c => c.homeAway === 'home');
-        const awayTeamRaw = competitors.find(c => c.homeAway === 'away');
-
-        if (!homeTeamRaw || !awayTeamRaw || !homeTeamRaw.team || !awayTeamRaw.team) {
-            throw new Error('Could not find complete home/away team data for event: ' + event.id);
-        }
-
-        const sportEmoji = getSportEmoji(sport);
-
-        // ULTRA SIMPLE: Just use basic new Date() like desktop
-        console.log('🎯 Raw ESPN date:', event.date);
-        let gameStartTime;
-        
-        try {
-            // Method 1: Direct - what desktop does
-            gameStartTime = new Date(event.date);
-            console.log('📅 Direct parsing result:', gameStartTime.toString());
-            
-            // If that fails, try with T replacement
-            if (isNaN(gameStartTime.getTime()) && typeof event.date === 'string' && event.date.includes(' ')) {
-                console.log('🔄 Trying T replacement...');
-                gameStartTime = new Date(event.date.replace(' ', 'T'));
-                console.log('📅 T replacement result:', gameStartTime.toString());
-            }
-            
-            // If still invalid, create fallback
-            if (isNaN(gameStartTime.getTime())) {
-                console.warn('⚠️ Date parsing failed, using fallback');
-                gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
-            }
-            
-        } catch (error) {
-            console.error('Date parsing error:', error);
-            gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
-        }
-
-        console.log('✅ Final game time:', gameStartTime.toString());
-
-        return {
-            id: event.id,
-            homeTeam: {
-                name: homeTeamRaw.team.displayName || homeTeamRaw.team.name,
-                abbr: homeTeamRaw.team.abbreviation,
-                logo: sportEmoji,
-                colors: [
-                    (homeTeamRaw.team.color || '505050'),
-                    (homeTeamRaw.team.alternateColor || '808080')
-                ]
-            },
-            awayTeam: {
-                name: awayTeamRaw.team.displayName || awayTeamRaw.team.name,
-                abbr: awayTeamRaw.team.abbreviation,
-                logo: sportEmoji,
-                colors: [
-                    (awayTeamRaw.team.color || '505050'),
-                    (awayTeamRaw.team.alternateColor || '808080')
-                ]
-            },
-            sport: sport,
-            venue: competition.venue?.fullName || `${sport} Stadium`,
-            startTime: gameStartTime,
-            status: event.status?.type?.detail || 'upcoming'
-        };
-
-    } catch (error) {
-        console.error('Error parsing ESPN game data for event:', event.id, error);
-        throw error;
-    }
 };
 
 // MANDATORY: Robust ESPN API with multiple fallback layers
@@ -2289,6 +2277,13 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const loadTodaysMatchup = async () => {
         setMatchupLoading(true);
 
+        // 6. ADD MOBILE DEBUG (temporary):
+        console.log('📱 MOBILE DEBUG - Raw ESPN data check:');
+        console.log('User Agent:', navigator.userAgent);
+        console.log('Test Date Parse:', Date.parse('2025-02-15T08:00Z'));
+        console.log('Test Date Object:', new Date('2025-02-15T08:00Z'));
+        console.log('Is Mobile Browser:', /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent));
+
         try {
             const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
 
@@ -2346,283 +2341,201 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const [timeLeft, setTimeLeft] = useState('');
     const [gameStarted, setGameStarted] = useState(false);
 
-    // ===== FIX 2: BULLETPROOF GameTimeDisplay =====
-    // QUICK FIX: Replace these specific components to remove "Invalid game time"
-
-// 1. REPLACE your GameTimeDisplay component with this:
-const GameTimeDisplay = ({ startTime }) => {
-    if (!startTime) {
-        console.warn('GameTimeDisplay: No startTime provided');
-        return (
-            <div className="text-center text-sm text-text-secondary mb-2">
-                <span className="font-medium">No game time available</span>
-            </div>
-        );
-    }
-
-    console.log('GameTimeDisplay: Raw startTime:', startTime);
-    console.log('GameTimeDisplay: StartTime type:', typeof startTime);
-
-    // Try to parse the time using multiple methods
-    let gameTime = null;
-    let displayText = 'Invalid time format';
-
-    // Method 1: If it's already a Date object
-    if (startTime instanceof Date && !isNaN(startTime.getTime())) {
-        gameTime = startTime;
-    }
-    // Method 2: Try parsing as string/number
-    else {
-        try {
-            const testDate = new Date(startTime);
-            if (!isNaN(testDate.getTime())) {
-                gameTime = testDate;
-            }
-        } catch (e) {
-            console.error('GameTimeDisplay: Failed to parse date:', e);
+    // 3. ULTRA-SIMPLE GameTimeDisplay:
+    const GameTimeDisplay = ({ startTime }) => {
+        if (!startTime) {
+            return null;
         }
-    }
 
-    // If we have a valid game time, format it
-    if (gameTime) {
+        // startTime should already be a valid Date object from parseESPNGameData
+        if (!(startTime instanceof Date) || isNaN(startTime.getTime())) {
+            console.error('❌ GameTimeDisplay: Invalid startTime:', startTime);
+            return (
+                <div className="text-center text-sm text-red-500 mb-2">
+                    <span className="font-medium">Invalid time</span>
+                </div>
+            );
+        }
+
         try {
-            const now = new Date();
-            const gameDate = new Date(gameTime.getFullYear(), gameTime.getMonth(), gameTime.getDate());
-            const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const tomorrowDate = new Date(todayDate.getTime() + 24 * 60 * 60 * 1000);
-
-            // Determine day text
-            let dayText = '';
-            if (gameDate.getTime() === todayDate.getTime()) {
-                dayText = 'Today';
-            } else if (gameDate.getTime() === tomorrowDate.getTime()) {
-                dayText = 'Tomorrow';
-            } else {
-                dayText = new Intl.DateTimeFormat('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric'
-                }).format(gameTime);
-            }
-
-            // Format time
-            const timeText = new Intl.DateTimeFormat('en-US', {
+            // Use the built-in toLocaleString for simplicity
+            const displayTime = startTime.toLocaleString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
                 hour: 'numeric',
                 minute: '2-digit',
                 timeZoneName: 'short'
-            }).format(gameTime);
+            });
 
-            displayText = `${dayText} • ${timeText}`;
-            console.log('GameTimeDisplay: Successfully formatted:', displayText);
-        } catch (formatError) {
-            console.error('GameTimeDisplay: Format error:', formatError);
-            // Fallback to simple display
-            displayText = gameTime.toLocaleString();
+            return (
+                <div className="text-center text-sm text-text-secondary mb-2 timer-text">
+                    <span className="font-medium">{displayTime}</span>
+                </div>
+            );
+        } catch (error) {
+            console.error('❌ GameTimeDisplay formatting error:', error);
+            return (
+                <div className="text-center text-sm text-text-secondary mb-2">
+                    <span className="font-medium">Display error</span>
+                </div>
+            );
         }
-    } else {
-        console.error('GameTimeDisplay: Could not parse startTime:', startTime);
-        // Don't show "Invalid" - just show a generic message
-        displayText = 'Game time pending';
-    }
-
-    return (
-        <div className="text-center text-sm text-text-secondary mb-2 timer-text">
-            <span className="font-medium">{displayText}</span>
-        </div>
-    );
-};
+    };
 
 
-    // ===== FIX 3: BULLETPROOF TIMER LOGIC (REPLACED ORIGINAL useEffect) =====
+    // 4. KEEP your existing timer useEffect - it should work fine now!
+    // Your timer countdown was already working, so don't change that logic.
     useEffect(() => {
-    // Early validation
-    if (!todaysMatchup || !todaysMatchup.startTime) {
-        console.warn('Timer: No matchup or startTime available');
-        setTimeLeft('Loading...');
-        return;
-    }
-
-    console.log('Timer: Raw startTime:', todaysMatchup.startTime);
-    console.log('Timer: StartTime type:', typeof todaysMatchup.startTime);
-
-    // ROBUST DATE PARSING - try multiple approaches
-    let gameTime = null;
-
-    // Approach 1: If it's already a Date object
-    if (todaysMatchup.startTime instanceof Date) {
-        if (!isNaN(todaysMatchup.startTime.getTime())) {
-            gameTime = todaysMatchup.startTime;
-            console.log('Timer: Using existing Date object');
+        // Early validation
+        if (!todaysMatchup || !todaysMatchup.startTime) {
+            console.warn('Timer: No matchup or startTime available');
+            setTimeLeft('Loading...');
+            return;
         }
-    }
 
-    // Approach 2: Try basic new Date()
-    if (!gameTime) {
-        try {
-            const basicDate = new Date(todaysMatchup.startTime);
-            if (!isNaN(basicDate.getTime())) {
-                gameTime = basicDate;
-                console.log('Timer: Basic new Date() worked');
+        console.log('Timer: Raw startTime:', todaysMatchup.startTime);
+        console.log('Timer: StartTime type:', typeof todaysMatchup.startTime);
+
+        // ROBUST DATE PARSING - try multiple approaches
+        let gameTime = null;
+
+        // Approach 1: If it's already a Date object
+        if (todaysMatchup.startTime instanceof Date) {
+            if (!isNaN(todaysMatchup.startTime.getTime())) {
+                gameTime = todaysMatchup.startTime;
+                console.log('Timer: Using existing Date object');
             }
-        } catch (e) {
-            console.log('Timer: Basic new Date() failed:', e);
         }
-    }
 
-    // Approach 3: Try Date.parse()
-    if (!gameTime) {
-        try {
-            const timestamp = Date.parse(todaysMatchup.startTime);
-            if (!isNaN(timestamp)) {
-                gameTime = new Date(timestamp);
-                console.log('Timer: Date.parse() worked');
-            }
-        } catch (e) {
-            console.log('Timer: Date.parse() failed:', e);
-        }
-    }
-
-    // Approach 4: Emergency fallback
-    if (!gameTime) {
-        console.error('Timer: All date parsing failed, using fallback');
-        // Create a game time 2 hours from now
-        gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-        setTimeLeft('Fallback time used');
-    }
-
-    console.log('Timer: Final gameTime:', gameTime);
-
-    let animationFrame;
-    let lastUpdate = 0;
-    let isComponentMounted = true;
-
-    const updateTimer = (timestamp) => {
-        if (!isComponentMounted) return;
-        
-        // Throttle updates
-        if (timestamp - lastUpdate >= 1000) {
+        // Approach 2: Try basic new Date()
+        if (!gameTime) {
             try {
-                const now = Date.now();
-                const gameTimeMs = gameTime.getTime();
-                
-                // Validate timestamps
-                if (isNaN(now) || isNaN(gameTimeMs)) {
-                    console.error('Timer: Invalid timestamps', { now, gameTimeMs });
+                const basicDate = new Date(todaysMatchup.startTime);
+                if (!isNaN(basicDate.getTime())) {
+                    gameTime = basicDate;
+                    console.log('Timer: Basic new Date() worked');
+                }
+            } catch (e) {
+                console.log('Timer: Basic new Date() failed:', e);
+            }
+        }
+
+        // Approach 3: Try Date.parse()
+        if (!gameTime) {
+            try {
+                const timestamp = Date.parse(todaysMatchup.startTime);
+                if (!isNaN(timestamp)) {
+                    gameTime = new Date(timestamp);
+                    console.log('Timer: Date.parse() worked');
+                }
+            } catch (e) {
+                console.log('Timer: Date.parse() failed:', e);
+            }
+        }
+
+        // Approach 4: Emergency fallback
+        if (!gameTime) {
+            console.error('Timer: All date parsing failed, using fallback');
+            // Create a game time 2 hours from now
+            gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            setTimeLeft('Fallback time used');
+        }
+
+        console.log('Timer: Final gameTime:', gameTime);
+
+        let animationFrame;
+        let lastUpdate = 0;
+        let isComponentMounted = true;
+
+        const updateTimer = (timestamp) => {
+            if (!isComponentMounted) return;
+            
+            // Throttle updates
+            if (timestamp - lastUpdate >= 1000) {
+                try {
+                    const now = Date.now();
+                    const gameTimeMs = gameTime.getTime();
+                    
+                    // Validate timestamps
+                    if (isNaN(now) || isNaN(gameTimeMs)) {
+                        console.error('Timer: Invalid timestamps', { now, gameTimeMs });
+                        setTimeLeft('Timer error');
+                        return;
+                    }
+
+                    const distance = gameTimeMs - now;
+
+                    if (distance < 0) {
+                        setGameStarted(true);
+                        setTimeLeft('Game Started!');
+                        return;
+                    }
+
+                    // Safe math calculations
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                    // Validate calculations
+                    if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
+                        console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
+                        setTimeLeft('Calculation error');
+                        return;
+                    }
+
+                    // Format time string
+                    let timeString = '';
+                    if (days > 0) {
+                        timeString = `${days}d ${hours}h ${minutes}m`;
+                    } else if (hours > 0) {
+                        timeString = `${hours}h ${minutes}m ${seconds}s`;
+                    } else if (minutes > 0) {
+                        timeString = `${minutes}m ${seconds}s`;
+                    } else {
+                        timeString = `${seconds}s`;
+                    }
+
+                    setTimeLeft(timeString);
+                    lastUpdate = timestamp;
+
+                } catch (error) {
+                    console.error('Timer calculation error:', error);
                     setTimeLeft('Timer error');
                     return;
                 }
-
-                const distance = gameTimeMs - now;
-
-                if (distance < 0) {
-                    setGameStarted(true);
-                    setTimeLeft('Game Started!');
-                    return;
-                }
-
-                // Safe math calculations
-                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-                // Validate calculations
-                if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
-                    console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
-                    setTimeLeft('Calculation error');
-                    return;
-                }
-
-                // Format time string
-                let timeString = '';
-                if (days > 0) {
-                    timeString = `${days}d ${hours}h ${minutes}m`;
-                } else if (hours > 0) {
-                    timeString = `${hours}h ${minutes}m ${seconds}s`;
-                } else if (minutes > 0) {
-                    timeString = `${minutes}m ${seconds}s`;
-                } else {
-                    timeString = `${seconds}s`;
-                }
-
-                setTimeLeft(timeString);
-                lastUpdate = timestamp;
-
-            } catch (error) {
-                console.error('Timer calculation error:', error);
-                setTimeLeft('Timer error');
-                return;
             }
-        }
 
-        // Continue animation loop
-        if (isComponentMounted) {
-            animationFrame = requestAnimationFrame(updateTimer);
-        }
-    };
+            // Continue animation loop
+            if (isComponentMounted) {
+                animationFrame = requestAnimationFrame(updateTimer);
+            }
+        };
 
-    // Handle visibility changes
-    const handleVisibilityChange = () => {
-        if (!document.hidden && isComponentMounted) {
-            lastUpdate = 0;
-            animationFrame = requestAnimationFrame(updateTimer);
-        } else if (animationFrame) {
-            cancelAnimationFrame(animationFrame);
-        }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Initial update
-    animationFrame = requestAnimationFrame(updateTimer);
-
-    return () => {
-        isComponentMounted = false;
-        if (animationFrame) {
-            cancelAnimationFrame(animationFrame);
-        }
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-}, [todaysMatchup?.startTime]); // Depend on startTime specifically
-
-// Mobile Timer Enhancement - ADD THIS AFTER YOUR EXISTING TIMER useEffect
-useEffect(() => {
-    // Mobile-specific timer fixes
-    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
-    
-    if (isMobile && todaysMatchup?.startTime) {
-        console.log('📱 Setting up mobile timer enhancements...');
-        
-        // Mobile browsers pause timers when app goes to background
-        let isAppVisible = true;
-        
+        // Handle visibility changes
         const handleVisibilityChange = () => {
-            isAppVisible = !document.hidden;
-            console.log('📱 App visibility changed:', isAppVisible ? 'visible' : 'hidden');
-            
-            if (isAppVisible) {
-                // App became visible again - force timer update
-                console.log('📱 App visible again, forcing timer refresh...');
-                // The main timer useEffect will handle the update
+            if (!document.hidden && isComponentMounted) {
+                lastUpdate = 0;
+                animationFrame = requestAnimationFrame(updateTimer);
+            } else if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
             }
         };
-        
-        const handlePageShow = () => {
-            console.log('📱 Page show event - mobile timer refresh');
-            isAppVisible = true;
-        };
-        
-        // Mobile-specific event listeners
+
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('pageshow', handlePageShow);
         
-        // Cleanup
+        // Initial update
+        animationFrame = requestAnimationFrame(updateTimer);
+
         return () => {
+            isComponentMounted = false;
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
             document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('pageshow', handlePageShow);
         };
-    }
-}, [todaysMatchup?.startTime]);
+    }, [todaysMatchup?.startTime]); // Depend on startTime specifically
 
 
 
@@ -3628,11 +3541,11 @@ useEffect(() => {
                     {/* Game Time Display - UPDATED */}
                     <div className="text-center mb-6 px-6"> {/* Added padding to align */}
                         {/* Show actual game time */}
-                        {todaysMatchup?.startTime && validation.isValid ? (
+                        {todaysMatchup?.startTime ? (
                             <GameTimeDisplay startTime={todaysMatchup.startTime} />
                         ) : (
-                            <div className="text-center text-sm text-red-500 mb-2">
-                                ⚠️ {validation.error || 'Invalid game time'}
+                            <div className="text-center text-sm text-text-secondary mb-2">
+                                <span className="font-medium">Loading game time...</span>
                             </div>
                         )}
 
