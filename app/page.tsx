@@ -1162,7 +1162,7 @@ const selectDailyGame = (validGames) => {
         selectedIndex,
         preferredGames: sortedGames.slice(0, 3).map(g => `${g.homeTeam.name} vs ${g.awayTeam.name}`),
         selected: `${selectedGame.homeTeam.name} vs ${selectedGame.awayTeam.name}`,
-        startTime: new Date(selectedGame.startTime).toLocaleString(),
+        startTime: new Date(selectedGame.startTime).toISOString(), // ✅ Mobile-safe
         hoursFromNow: Math.round((new Date(selectedGame.startTime) - now) / (1000 * 60 * 60) * 10) / 10
     });
 
