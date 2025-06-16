@@ -2340,199 +2340,261 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 
     // ===== FIX 2: BULLETPROOF GameTimeDisplay =====
     const GameTimeDisplay = ({ startTime }) => {
-        // Early return if no startTime
-        if (!startTime) {
-            console.warn('GameTimeDisplay: No startTime provided');
-            return null;
-        }
+    // Early return if no startTime
+    if (!startTime) {
+        console.warn('GameTimeDisplay: No startTime provided');
+        return null;
+    }
 
-        // Safe date parsing
-        const gameTime = safeParseDate(startTime);
-        if (!gameTime) {
-            console.error('GameTimeDisplay: Invalid startTime:', startTime);
-            return (
-                <div className="text-center text-sm text-red-500 mb-2">
-                    ⚠️ Invalid game time
-                </div>
-            );
-        }
+    console.log('GameTimeDisplay: Raw startTime:', startTime);
+    console.log('GameTimeDisplay: StartTime type:', typeof startTime);
 
-        const now = new Date();
-        if (!isValidDate(now)) {
-            console.error('GameTimeDisplay: System date invalid');
-            return null;
-        }
+    // ROBUST DATE PARSING for display
+    let gameTime = null;
 
-        // Safe date comparisons
+    // Try multiple parsing approaches
+    if (startTime instanceof Date && !isNaN(startTime.getTime())) {
+        gameTime = startTime;
+    } else {
         try {
-            // Use local date comparisons to avoid timezone issues
-            const gameLocalDate = new Date(gameTime.getFullYear(), gameTime.getMonth(), gameTime.getDate());
-            const nowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const tomorrowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-            
-            const isToday = gameLocalDate.getTime() === nowLocalDate.getTime();
-            const isTomorrow = gameLocalDate.getTime() === tomorrowLocalDate.getTime();
+            gameTime = new Date(startTime);
+            if (isNaN(gameTime.getTime())) {
+                gameTime = null;
+            }
+        } catch (e) {
+            console.error('GameTimeDisplay: Date parsing failed:', e);
+            gameTime = null;
+        }
+    }
 
-            // Safe formatting with fallbacks
-            let dayText = 'Unknown';
-            let timeText = 'Unknown';
+    if (!gameTime) {
+        console.error('GameTimeDisplay: Could not parse startTime:', startTime);
+        return (
+            <div className="text-center text-sm text-red-500 mb-2">
+                ⚠️ Invalid game time
+            </div>
+        );
+    }
 
-            try {
-                if (isToday) {
-                    dayText = 'Today';
-                } else if (isTomorrow) {
-                    dayText = 'Tomorrow';
-                } else {
-                    const dateFormatter = new Intl.DateTimeFormat('en-US', {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric'
-                    });
-                    dayText = dateFormatter.format(gameTime);
-                }
+    const now = new Date();
+    if (!isValidDate(now)) {
+        console.error('GameTimeDisplay: System date invalid');
+        return null;
+    }
 
-                const timeFormatter = new Intl.DateTimeFormat('en-US', {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    timeZoneName: 'short'
+    // Safe date comparisons
+    try {
+        // Use local date comparisons to avoid timezone issues
+        const gameLocalDate = new Date(gameTime.getFullYear(), gameTime.getMonth(), gameTime.getDate());
+        const nowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        
+        const isToday = gameLocalDate.getTime() === nowLocalDate.getTime();
+        const isTomorrow = gameLocalDate.getTime() === tomorrowLocalDate.getTime();
+
+        // Safe formatting with fallbacks
+        let dayText = 'Unknown';
+        let timeText = 'Unknown';
+
+        try {
+            if (isToday) {
+                dayText = 'Today';
+            } else if (isTomorrow) {
+                dayText = 'Tomorrow';
+            } else {
+                const dateFormatter = new Intl.DateTimeFormat('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric'
                 });
-                timeText = timeFormatter.format(gameTime);
-
-            } catch (formatError) {
-                console.error('Date formatting error:', formatError);
-                // Fallback to basic formatting
-                dayText = gameTime.toLocaleDateString();
-                timeText = gameTime.toLocaleTimeString();
+                dayText = dateFormatter.format(gameTime);
             }
 
-            return (
-                <div className="text-center text-sm text-text-secondary mb-2 timer-text">
-                    <span className="font-medium">{dayText}</span>
-                    <span className="mx-2">•</span>
-                    <span className="font-medium">{timeText}</span>
-                </div>
-            );
+            const timeFormatter = new Intl.DateTimeFormat('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
+            timeText = timeFormatter.format(gameTime);
 
-        } catch (error) {
-            console.error('GameTimeDisplay error:', error);
-            return (
-                <div className="text-center text-sm text-red-500 mb-2">
-                    ⚠️ Date display error
-                </div>
-            );
+        } catch (formatError) {
+            console.error('Date formatting error:', formatError);
+            // Fallback to basic formatting
+            dayText = gameTime.toLocaleDateString();
+            timeText = gameTime.toLocaleTimeString();
         }
-    };
+
+        return (
+            <div className="text-center text-sm text-text-secondary mb-2 timer-text">
+                <span className="font-medium">{dayText}</span>
+                <span className="mx-2">•</span>
+                <span className="font-medium">{timeText}</span>
+            </div>
+        );
+
+    } catch (error) {
+        console.error('GameTimeDisplay error:', error);
+        return (
+            <div className="text-center text-sm text-red-500 mb-2">
+                ⚠️ Date display error
+            </div>
+        );
+    }
+};
 
 
     // ===== FIX 3: BULLETPROOF TIMER LOGIC (REPLACED ORIGINAL useEffect) =====
     useEffect(() => {
-        // Early validation
-        if (!todaysMatchup || !todaysMatchup.startTime) {
-            console.warn('Timer: No matchup or startTime available');
-            setTimeLeft('Loading...');
-            return;
+    // Early validation
+    if (!todaysMatchup || !todaysMatchup.startTime) {
+        console.warn('Timer: No matchup or startTime available');
+        setTimeLeft('Loading...');
+        return;
+    }
+
+    console.log('Timer: Raw startTime:', todaysMatchup.startTime);
+    console.log('Timer: StartTime type:', typeof todaysMatchup.startTime);
+
+    // ROBUST DATE PARSING - try multiple approaches
+    let gameTime = null;
+
+    // Approach 1: If it's already a Date object
+    if (todaysMatchup.startTime instanceof Date) {
+        if (!isNaN(todaysMatchup.startTime.getTime())) {
+            gameTime = todaysMatchup.startTime;
+            console.log('Timer: Using existing Date object');
         }
+    }
 
-        // Validate game time
-        const gameTime = safeParseDate(todaysMatchup.startTime);
-        if (!gameTime) {
-            console.error('Timer: Invalid game startTime:', todaysMatchup.startTime);
-            setTimeLeft('Invalid game time');
-            return;
+    // Approach 2: Try basic new Date()
+    if (!gameTime) {
+        try {
+            const basicDate = new Date(todaysMatchup.startTime);
+            if (!isNaN(basicDate.getTime())) {
+                gameTime = basicDate;
+                console.log('Timer: Basic new Date() worked');
+            }
+        } catch (e) {
+            console.log('Timer: Basic new Date() failed:', e);
         }
+    }
 
-        let animationFrame;
-        let lastUpdate = 0;
-        let isComponentMounted = true;
+    // Approach 3: Try Date.parse()
+    if (!gameTime) {
+        try {
+            const timestamp = Date.parse(todaysMatchup.startTime);
+            if (!isNaN(timestamp)) {
+                gameTime = new Date(timestamp);
+                console.log('Timer: Date.parse() worked');
+            }
+        } catch (e) {
+            console.log('Timer: Date.parse() failed:', e);
+        }
+    }
 
-        const updateTimer = (timestamp) => {
-            if (!isComponentMounted) return;
-            
-            // Throttle updates
-            if (timestamp - lastUpdate >= 1000) {
-                try {
-                    const now = Date.now();
-                    const gameTimeMs = gameTime.getTime();
-                    
-                    // Validate timestamps
-                    if (isNaN(now) || isNaN(gameTimeMs)) {
-                        console.error('Timer: Invalid timestamps', { now, gameTimeMs });
-                        setTimeLeft('Timer error');
-                        return;
-                    }
+    // Approach 4: Emergency fallback
+    if (!gameTime) {
+        console.error('Timer: All date parsing failed, using fallback');
+        // Create a game time 2 hours from now
+        gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        setTimeLeft('Fallback time used');
+    }
 
-                    const distance = gameTimeMs - now;
+    console.log('Timer: Final gameTime:', gameTime);
 
-                    if (distance < 0) {
-                        setGameStarted(true);
-                        setTimeLeft('Game Started!');
-                        return;
-                    }
+    let animationFrame;
+    let lastUpdate = 0;
+    let isComponentMounted = true;
 
-                    // Safe math calculations
-                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-                    // Validate calculations
-                    if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
-                        console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
-                        setTimeLeft('Calculation error');
-                        return;
-                    }
-
-                    // Format time string
-                    let timeString = '';
-                    if (days > 0) {
-                        timeString = `${days}d ${hours}h ${minutes}m`;
-                    } else if (hours > 0) {
-                        timeString = `${hours}h ${minutes}m ${seconds}s`;
-                    } else if (minutes > 0) {
-                        timeString = `${minutes}m ${seconds}s`;
-                    } else {
-                        timeString = `${seconds}s`;
-                    }
-
-                    setTimeLeft(timeString);
-                    lastUpdate = timestamp;
-
-                } catch (error) {
-                    console.error('Timer calculation error:', error);
+    const updateTimer = (timestamp) => {
+        if (!isComponentMounted) return;
+        
+        // Throttle updates
+        if (timestamp - lastUpdate >= 1000) {
+            try {
+                const now = Date.now();
+                const gameTimeMs = gameTime.getTime();
+                
+                // Validate timestamps
+                if (isNaN(now) || isNaN(gameTimeMs)) {
+                    console.error('Timer: Invalid timestamps', { now, gameTimeMs });
                     setTimeLeft('Timer error');
                     return;
                 }
-            }
 
-            // Continue animation loop
-            if (isComponentMounted) {
-                animationFrame = requestAnimationFrame(updateTimer);
-            }
-        };
+                const distance = gameTimeMs - now;
 
-        // Handle visibility changes
-        const handleVisibilityChange = () => {
-            if (!document.hidden && isComponentMounted) {
-                lastUpdate = 0;
-                animationFrame = requestAnimationFrame(updateTimer);
-            } else if (animationFrame) {
-                cancelAnimationFrame(animationFrame);
-            }
-        };
+                if (distance < 0) {
+                    setGameStarted(true);
+                    setTimeLeft('Game Started!');
+                    return;
+                }
 
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        
-        // Initial update
-        animationFrame = requestAnimationFrame(updateTimer);
+                // Safe math calculations
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-        return () => {
-            isComponentMounted = false;
-            if (animationFrame) {
-                cancelAnimationFrame(animationFrame);
+                // Validate calculations
+                if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
+                    console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
+                    setTimeLeft('Calculation error');
+                    return;
+                }
+
+                // Format time string
+                let timeString = '';
+                if (days > 0) {
+                    timeString = `${days}d ${hours}h ${minutes}m`;
+                } else if (hours > 0) {
+                    timeString = `${hours}h ${minutes}m ${seconds}s`;
+                } else if (minutes > 0) {
+                    timeString = `${minutes}m ${seconds}s`;
+                } else {
+                    timeString = `${seconds}s`;
+                }
+
+                setTimeLeft(timeString);
+                lastUpdate = timestamp;
+
+            } catch (error) {
+                console.error('Timer calculation error:', error);
+                setTimeLeft('Timer error');
+                return;
             }
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [todaysMatchup?.startTime]); // Depend on startTime specifically
+        }
+
+        // Continue animation loop
+        if (isComponentMounted) {
+            animationFrame = requestAnimationFrame(updateTimer);
+        }
+    };
+
+    // Handle visibility changes
+    const handleVisibilityChange = () => {
+        if (!document.hidden && isComponentMounted) {
+            lastUpdate = 0;
+            animationFrame = requestAnimationFrame(updateTimer);
+        } else if (animationFrame) {
+            cancelAnimationFrame(animationFrame);
+        }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Initial update
+    animationFrame = requestAnimationFrame(updateTimer);
+
+    return () => {
+        isComponentMounted = false;
+        if (animationFrame) {
+            cancelAnimationFrame(animationFrame);
+        }
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+}, [todaysMatchup?.startTime]); // Depend on startTime specifically
+
 
 
     /**
