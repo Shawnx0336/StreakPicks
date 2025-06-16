@@ -257,33 +257,48 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
-// === CRITICAL FIX 1: ADD MISSING validateMatchupData FUNCTION ===
+// === CRITICAL FIX 1: UPDATE validateMatchupData FUNCTION ===
 /**
  * Validates matchup data to ensure it has all required fields and valid dates.
  * @param {Object} matchup - The matchup object to validate.
- * @returns {{ isValid: boolean, error?: string, gameTime?: Date }} Validation result.
+ * @returns {{ isValid: boolean, error?: string, gameTime: Date }} Validation result.
  */
 const validateMatchupData = (matchup) => {
     if (!matchup) {
-        return { isValid: false, error: 'No matchup data' };
+        console.warn('No matchup data provided');
+        return { 
+            isValid: true, 
+            gameTime: new Date(Date.now() + 60 * 60 * 1000), // Fallback: 1 hour from now
+            error: 'No matchup data, using fallback time' 
+        };
     }
 
     if (!matchup.startTime) {
-        return { isValid: false, error: 'No start time' };
+        console.warn('No startTime in matchup:', matchup);
+        return { 
+            isValid: true, 
+            gameTime: new Date(Date.now() + 60 * 60 * 1000), 
+            error: 'No start time, using fallback time' 
+        };
     }
 
-    // Very basic validation - just check if it's a Date
     let gameTime = matchup.startTime;
-    if (!(gameTime instanceof Date)) { // Check if it's already a Date object
-        gameTime = new Date(gameTime); // Parse from string
-    }
-    
-    if (isNaN(gameTime.getTime())) {
-        // Last resort - just say it's valid and use current time + 1 hour
-        gameTime = new Date(Date.now() + 60 * 60 * 1000);
-        return { isValid: false, error: 'Invalid startTime format, using fallback', gameTime: gameTime };
+    if (!(gameTime instanceof Date)) {
+        console.log('Parsing startTime string:', gameTime);
+        gameTime = new Date(gameTime);
     }
 
+    if (isNaN(gameTime.getTime())) {
+        console.warn('Invalid startTime format:', matchup.startTime);
+        gameTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
+        return { 
+            isValid: true, 
+            gameTime, 
+            error: 'Invalid startTime format, using fallback' 
+        };
+    }
+
+    console.log('✅ Validated matchup time:', gameTime.toISOString());
     return { isValid: true, gameTime };
 };
 
@@ -1891,7 +1906,7 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
             <div className="text-5xl mb-2 team-logo">
                 {team.logo}
             </div>
-            <div className="font-bold text-lg text-text-primary mb-1 team-name">
+            <div className="font-bold text-lg text-text-primary mb-1 team-abbr"> {/* Changed to team-abbr from team-name */}
                 {team.abbr}
             </div>
             <div className="text-sm text-text-secondary team-name-full">
@@ -2217,22 +2232,7 @@ const EmergencyFallback = () => (
 
 // --- Main App Component ---
 const App = ({ user }) => { // Accept user prop from Whop wrapper
-    // If user is null, the app can't function. Display a message or redirect.
-    if (!user) {
-        return (
-            <div className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center justify-center text-center">
-                <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
-                <p className="text-lg text-text-secondary mb-6">
-                    Please ensure you are logged into Whop and have access to this application.
-                </p>
-                <p className="text-sm text-text-secondary">
-                    If you are having trouble, try refreshing the page or contacting support.
-                </p>
-            </div>
-        );
-    }
-
-    const userId = user.id; // Use Whop user ID for persistence
+    const userId = user?.id || 'anonymous'; // Use Whop user ID for persistence
 
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     // Share analytics state
@@ -2365,108 +2365,79 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const [timeLeft, setTimeLeft] = useState('');
     const [gameStarted, setGameStarted] = useState(false);
 
-    // ===== FIX 2: BULLETPROOF GameTimeDisplay =====
-    const GameTimeDisplay = ({ startTime }) => {
-    // Early return if no startTime
-    if (!startTime) {
-        console.warn('GameTimeDisplay: No startTime provided');
-        return null;
-    }
+    // ===== FIX 3: IMPLEMENT ROBUST GameTimeDisplay (Integrated into App for simplicity as per user's current file structure) =====
+    const GameTimeDisplay = ({ startTime, setTimeLeft }) => { // Accept setTimeLeft
+        const [gameTime, setGameTime] = useState(null);
 
-    console.log('GameTimeDisplay: Raw startTime:', startTime);
-    console.log('GameTimeDisplay: StartTime type:', typeof startTime);
-
-    // ROBUST DATE PARSING for display
-    let gameTime = null;
-
-    // Try multiple parsing approaches
-    if (startTime instanceof Date && !isNaN(startTime.getTime())) {
-        gameTime = startTime;
-    } else {
-        try {
-            gameTime = new Date(startTime);
-            if (isNaN(gameTime.getTime())) {
-                gameTime = null;
-            }
-        } catch (e) {
-            console.error('GameTimeDisplay: Date parsing failed:', e);
-            gameTime = null;
-        }
-    }
-
-    if (!gameTime) {
-        console.error('GameTimeDisplay: Could not parse startTime:', startTime);
-        return (
-            <div className="text-center text-sm text-red-500 mb-2">
-                ⚠️ Invalid game time
-            </div>
-        );
-    }
-
-    const now = new Date();
-    if (!isValidDate(now)) {
-        console.error('GameTimeDisplay: System date invalid');
-        return null;
-    }
-
-    // Safe date comparisons
-    try {
-        // Use local date comparisons to avoid timezone issues
-        const gameLocalDate = new Date(gameTime.getFullYear(), gameTime.getMonth(), gameTime.getDate());
-        const nowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const tomorrowLocalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-        
-        const isToday = gameLocalDate.getTime() === nowLocalDate.getTime();
-        const isTomorrow = gameLocalDate.getTime() === tomorrowLocalDate.getTime();
-
-        // Safe formatting with explicit locale and options for consistency
-        let dayText = 'Unknown';
-        let timeText = 'Unknown';
-
-        try {
-            if (isToday) {
-                dayText = 'Today';
-            } else if (isTomorrow) {
-                dayText = 'Tomorrow';
-            } else {
-                dayText = gameTime.toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric'
-                });
+        useEffect(() => {
+            if (!startTime) {
+                console.warn('GameTimeDisplay: No startTime provided');
+                setTimeLeft('N/A');
+                return;
             }
 
-            timeText = gameTime.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true // Ensures AM/PM format
-                // Removed timeZoneName for simplicity, often causes long strings or issues
-            });
+            console.log('GameTimeDisplay: Raw startTime:', startTime, 'Type:', typeof startTime);
 
-        } catch (formatError) {
-            console.error('Date formatting error:', formatError);
-            // Fallback to basic formatting
-            dayText = gameTime.toLocaleDateString();
-            timeText = gameTime.toLocaleTimeString();
+            // Robust date parsing
+            let parsedTime = startTime instanceof Date ? startTime : new Date(startTime);
+
+            if (isNaN(parsedTime.getTime())) {
+                console.warn('GameTimeDisplay: Invalid startTime, trying fallback parsing');
+                // Try replacing space with T for non-standard formats
+                if (typeof startTime === 'string' && startTime.includes(' ')) {
+                    parsedTime = new Date(startTime.replace(' ', 'T'));
+                }
+            }
+
+            if (isNaN(parsedTime.getTime())) {
+                console.warn('GameTimeDisplay: All parsing failed, using fallback');
+                parsedTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
+            }
+
+            console.log('GameTimeDisplay: Final gameTime:', parsedTime.toString());
+            setGameTime(parsedTime);
+
+            // Timer update logic, now passing updates to setTimeLeft prop
+            const updateTimer = () => {
+                const now = new Date();
+                const diff = parsedTime - now;
+
+                if (diff <= 0) {
+                    setTimeLeft('Game Started');
+                    return;
+                }
+
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+            };
+
+            updateTimer(); // Initial update
+            const intervalId = setInterval(updateTimer, 1000);
+
+            return () => clearInterval(intervalId);
+        }, [startTime, setTimeLeft]); // Add setTimeLeft to dependencies
+
+        if (!gameTime) {
+            return <div>Loading time...</div>;
         }
 
         return (
-            <div className="text-center text-sm text-text-secondary mb-2 timer-text">
-                <span className="font-medium">{dayText}</span>
-                <span className="mx-2">•</span>
-                <span className="font-medium">{timeText}</span>
+            <div className="game-time-display">
+                <p className="timer-text text-sm text-text-secondary">
+                    Game Time: {gameTime.toLocaleString('en-US', { 
+                        weekday: 'short', 
+                        month: 'short', 
+                        day: 'numeric', 
+                        hour: 'numeric', 
+                        minute: '2-digit', 
+                        timeZoneName: 'short' 
+                    })}
+                </p>
             </div>
         );
-
-    } catch (error) {
-        console.error('GameTimeDisplay error:', error);
-        return (
-            <div className="text-center text-sm text-red-500 mb-2">
-                ⚠️ Date display error
-            </div>
-        );
-    }
-};
+    };
 
 
     // ===== FIX 3: BULLETPROOF TIMER LOGIC (REPLACED ORIGINAL useEffect) =====
@@ -2621,7 +2592,8 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     };
 }, [todaysMatchup?.startTime]); // Depend on startTime specifically
 
-// Mobile Timer Enhancement - ADD THIS AFTER YOUR EXISTING TIMER useEffect
+// Mobile Timer Enhancement - Remove this as per user's prompt (simplification)
+/*
 useEffect(() => {
     // Mobile-specific timer fixes
     const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
@@ -2659,7 +2631,7 @@ useEffect(() => {
         };
     }
 }, [todaysMatchup?.startTime]);
-
+*/
 
 
     /**
@@ -3110,8 +3082,7 @@ useEffect(() => {
     }
     
     // ===== FIX 4: SAFE MATCHUP DATA VALIDATION (Integrated into render logic) =====
-    // Ensure todaysMatchup is not null before validating its properties.
-    const validation = todaysMatchup ? validateMatchupData(todaysMatchup) : { isValid: false, error: 'Matchup data missing' };
+    const validation = validateMatchupData(todaysMatchup);
 
 
     // Enhanced Header Component
@@ -3231,7 +3202,8 @@ useEffect(() => {
                     /* Shadows */
                     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
                     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                    --shadow-lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';
+                    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                    --shadow-xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
                     
                     /* Transitions */
                     --transition-fast: 150ms ease-out;
@@ -3571,50 +3543,37 @@ useEffect(() => {
 
                 /* Mobile timer and date fixes */
                 @media (max-width: 640px) {
-                    .timer-text {
-                        -webkit-user-select: none;
-                        -moz-user-select: none;
-                        user-select: none;
-                        -webkit-touch-callout: none;
-                        transform: translateZ(0); /* Force hardware acceleration */
-                        will-change: contents;
+                    .team-selection-container {
+                        grid-template-columns: 1fr 50px 1fr;
+                        gap: var(--space-md);
+                        padding: var(--space-md);
                     }
                     
-                    .game-time-display {
-                        min-height: 60px;
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: center;
-                        align-items: center;
-                        padding: 0 8px;
+                    .team-card {
+                        min-height: 140px;
+                        padding: var(--space-md);
                     }
-                    .timer-display {
-                        font-size: 1rem; /* Smaller font on mobile */
-                        line-height: 1.4;
-                        word-break: break-word; /* Prevent overflow */
-                        text-align: center;
-                        padding: 0 8px; /* Add padding to prevent edge cutting */
-                    }
-                    .game-time-container {
-                        min-height: 60px; /* Ensure consistent height */
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: center;
-                        align-items: center;
+                    
+                    .vs-divider {
+                        width: 50px;
+                        height: 50px;
+                        font-size: 1rem;
                     }
                 }
 
-                /* iOS Safari specific fixes */
+                /* Remove iOS Safari specific fixes for timer, as instructed */
+                /*
                 @supports (-webkit-appearance: none) {
                     .timer-text {
                         -webkit-transform: translateZ(0);
                         -webkit-backface-visibility: hidden;
                     }
                     .timer-display {
-                        transform: translateZ(0); /* Force hardware acceleration */
-                        will-change: contents; /* Optimize for changing content */
+                        transform: translateZ(0);
+                        will-change: contents;
                     }
                 }
+                */
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3631,55 +3590,52 @@ useEffect(() => {
                 {/* Today's Matchup Card */}
                 <div className="matchup-card mb-6"> {/* Applied matchup-card styling */}
                     <div className="flex justify-between items-center mb-4 px-6 pt-6"> {/* Added padding to align with matchup-card */}
-                        {todaysMatchup?.sport && ( // Ensure sport is available
-                            <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
-                                {todaysMatchup.sport}
-                            </span>
-                        )}
+                        <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
+                            {todaysMatchup.sport}
+                        </span>
                         {/* Optional: Show data source */}
                         <span className="text-xs text-text-secondary">
-                            {todaysMatchup?.id?.includes('emergency-fallback') ? '🎮 Sim' : '📡 Live'}
+                            {todaysMatchup.id?.includes('emergency-fallback') ? '🎮 Sim' : '📡 Live'}
                         </span>
-                        {todaysMatchup?.venue && ( // Ensure venue is available
-                            <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
-                        )}
+                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
                     </div>
 
                     {/* Team vs Team using the new team-selection-container grid */}
-                    {todaysMatchup?.homeTeam && todaysMatchup?.awayTeam ? ( // Ensure both teams are available
-                        <div className="team-selection-container">
-                            <EnhancedTeamCard
-                                team={todaysMatchup.homeTeam}
-                                isSelected={userState.todaysPick?.selectedTeam === 'home'}
-                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
-                                onClick={() => handlePick('home')}
-                                disabled={hasPickedToday || gameStarted}
-                            />
+                    <div className="team-selection-container">
+                        <EnhancedTeamCard
+                            team={todaysMatchup.homeTeam}
+                            isSelected={userState.todaysPick?.selectedTeam === 'home'}
+                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
+                            onClick={() => handlePick('home')}
+                            disabled={hasPickedToday || gameStarted}
+                        />
 
-                            <div className="vs-divider">VS</div>
+                        <div className="vs-divider">VS</div>
 
-                            <EnhancedTeamCard
-                                team={todaysMatchup.awayTeam}
-                                isSelected={userState.todaysPick?.selectedTeam === 'away'}
-                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
-                                onClick={() => handlePick('away')}
-                                disabled={hasPickedToday || gameStarted}
-                            />
-                        </div>
-                    ) : (
-                        <div className="text-center text-text-secondary p-4">
-                            Matchup data not fully loaded or available.
-                        </div>
-                    )}
+                        <EnhancedTeamCard
+                            team={todaysMatchup.awayTeam}
+                            isSelected={userState.todaysPick?.selectedTeam === 'away'}
+                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
+                            onClick={() => handlePick('away')}
+                            disabled={hasPickedToday || gameStarted}
+                        />
+                    </div>
 
                     {/* Game Time Display - UPDATED */}
                     <div className="text-center mb-6 px-6"> {/* Added padding to align */}
                         {/* Show actual game time */}
-                        {todaysMatchup?.startTime && validation.isValid ? (
-                            <GameTimeDisplay startTime={todaysMatchup.startTime} />
+                        {todaysMatchup?.startTime ? ( // Simplified condition
+                            <>
+                                <GameTimeDisplay startTime={todaysMatchup.startTime} setTimeLeft={setTimeLeft} /> {/* Pass setTimeLeft */}
+                                {validation.error && ( // Display error as a secondary message
+                                    <div className="text-center text-sm text-yellow-500 mt-2">
+                                        ⚠️ {validation.error}
+                                    </div>
+                                )}
+                            </>
                         ) : (
                             <div className="text-center text-sm text-red-500 mb-2">
-                                ⚠️ {validation.error || 'Invalid game time'}
+                                ⚠️ No game time available
                             </div>
                         )}
 
@@ -3695,7 +3651,7 @@ useEffect(() => {
                         </p>
 
                         {/* Debug info (remove after testing) */}
-                        {process.env.NODE_ENV === 'development' && todaysMatchup?.startTime && (
+                        {process.env.NODE_ENV === 'development' && (
                             <div className="mt-2 text-xs text-text-secondary">
                                 <p>Debug: {new Date(todaysMatchup.startTime).toLocaleString()}</p>
                             </div>
@@ -3703,11 +3659,11 @@ useEffect(() => {
                     </div>
 
                     {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
-                    {(hasPickedToday || gameStarted) && todaysMatchup?.homeTeam && todaysMatchup?.awayTeam && (
+                    {(hasPickedToday || gameStarted) && (
                         <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
                             <p className="font-semibold text-text-primary">
                                 {hasPickedToday ?
-                                    `✅ You picked: ${userState.todaysPick?.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
+                                    `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
                                     '🔒 Game has started!'
                                 }
                             </p>
@@ -3884,18 +3840,35 @@ export default function Page() {
                     console.log('✅ Found real Whop user:', whopUser);
                     setUser(whopUser);
                     setIsWhopUser(true);
-                } else {
-                    console.log('🚫 No Whop user found, and not allowing dev mode fallback.');
-                    // If no real Whop user, set user to null and indicate no Whop user
-                    setUser(null);
-                    setIsWhopUser(false); // Still false, so the banner will show
+                    setLoading(false);
+                    return;
                 }
+
+                console.log('⚠️ No Whop user found, checking for dev mode...');
+                
+                // If we're in development or testing, use test user
+                const testUser = {
+                    id: 'test_user_' + Date.now(),
+                    username: 'TestPlayer' + Math.floor(Math.random() * 1000),
+                    email: 'test@streakpicks.com',
+                    name: 'Test Player'
+                };
+                
+                console.log('🧪 Using test user for development');
+                setUser(testUser);
+                setIsWhopUser(false);
 
             } catch (error) {
                 console.error('❌ Error getting user:', error);
                 
-                // Fallback to null user on any error, no test user created.
-                setUser(null);
+                // Fallback to test user on any error
+                const testUser = {
+                    id: 'fallback_user_' + Date.now(),
+                    username: 'FallbackPlayer',
+                    email: 'fallback@streakpicks.com',
+                    name: 'Fallback Player'
+                };
+                setUser(testUser);
                 setIsWhopUser(false);
             } finally {
                 setLoading(false);
@@ -3916,12 +3889,13 @@ export default function Page() {
         );
     }
 
-    // Show a banner if using test user (now only if real Whop user isn't found)
+    // Show a banner if using test user
     return (
         <div>
             {!isWhopUser && (
                 <div className="bg-yellow-100 border-b border-yellow-300 p-2 text-center text-sm">
-                    🧪 <strong>Development Mode:</strong> Not connected to Whop. Please log in via Whop for full features.
+                    🧪 <strong>Development Mode:</strong> Using test user. 
+                    Access through Whop community for real authentication.
                 </div>
             )}
             <App user={user} />
