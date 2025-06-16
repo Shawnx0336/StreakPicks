@@ -3351,56 +3351,83 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
 export default function Page() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [isWhopUser, setIsWhopUser] = useState(false);
 
     useEffect(() => {
-        async function getWhopUser() {
+        async function getUser() {
             try {
-                // Try to get user from Whop headers directly
-                const response = await fetch('/api/users/me', {
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
+                console.log('🔍 Checking for Whop user...');
+                
+                // First, try to get real Whop user from headers
+                const whopResponse = await fetch('/api/whop/user', {
+                    method: 'GET',
+                    credentials: 'include'
                 });
 
-                if (response.ok) {
-                    const userData = await response.json();
-                    setUser(userData);
-                } else {
-                    // If no Whop user, create a test user
-                    const testUser = {
-                        id: 'user_' + Date.now(),
-                        username: 'TestPlayer' + Math.floor(Math.random() * 1000),
-                        email: 'test@example.com',
-                        name: 'Test Player'
-                    };
-                    setUser(testUser);
+                if (whopResponse.ok) {
+                    const whopUser = await whopResponse.json();
+                    console.log('✅ Found real Whop user:', whopUser);
+                    setUser(whopUser);
+                    setIsWhopUser(true);
+                    setLoading(false);
+                    return;
                 }
-            } catch (err) {
-                // On any error, just use test user
+
+                console.log('⚠️ No Whop user found, checking for dev mode...');
+                
+                // If we're in development or testing, use test user
                 const testUser = {
-                    id: 'user_' + Date.now(),
+                    id: 'test_user_' + Date.now(),
                     username: 'TestPlayer' + Math.floor(Math.random() * 1000),
-                    email: 'test@example.com',
+                    email: 'test@streakpicks.com',
                     name: 'Test Player'
                 };
+                
+                console.log('🧪 Using test user for development');
                 setUser(testUser);
+                setIsWhopUser(false);
+
+            } catch (error) {
+                console.error('❌ Error getting user:', error);
+                
+                // Fallback to test user on any error
+                const testUser = {
+                    id: 'fallback_user_' + Date.now(),
+                    username: 'FallbackPlayer',
+                    email: 'fallback@streakpicks.com',
+                    name: 'Fallback Player'
+                };
+                setUser(testUser);
+                setIsWhopUser(false);
             } finally {
                 setLoading(false);
             }
         }
 
-        getWhopUser();
+        getUser();
     }, []);
 
     if (loading) {
         return (
             <div className="min-h-screen bg-white flex items-center justify-center">
-                <div>Loading...</div>
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                    <p>Connecting to Whop...</p>
+                </div>
             </div>
         );
     }
 
-    // Always render the app - no auth blocking!
-    return <App user={user} />;
+    // Show a banner if using test user
+    return (
+        <div>
+            {!isWhopUser && (
+                <div className="bg-yellow-100 border-b border-yellow-300 p-2 text-center text-sm">
+                    🧪 <strong>Development Mode:</strong> Using test user. 
+                    Access through Whop community for real authentication.
+                </div>
+            )}
+            <App user={user} />
+        </div>
+    );
 }
