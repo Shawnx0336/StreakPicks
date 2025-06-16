@@ -68,12 +68,14 @@ const useWhop = () => {
                     throw new Error(`Authentication check failed: ${response.status}`);
                 }
             } catch (err) {
-    console.error('Auth check error:', err);
-    setError(err instanceof Error ? err : new Error('Authentication failed'));
-    setUser(null);
-    setIsAuthenticated(false);
-    setHasAccess(false);
-}
+                console.error('Auth check error:', err);
+                setError(err instanceof Error ? err : new Error('Authentication failed'));
+                setUser(null);
+                setIsAuthenticated(false);
+                setHasAccess(false);
+            } finally {
+                setIsLoading(false); // Set loading to false once check is complete
+            }
         };
 
         checkAuthStatus();
@@ -257,28 +259,103 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
+// === CRITICAL FIX 1: UPDATE validateMatchupData FUNCTION ===
 /**
- * Consolidates date parsing logic for game times.
- * @param {*} startTime - The raw start time from the API or stored state.
- * @returns {Date | null} A valid Date object, or a fallback Date, or null if unrecoverable.
+ * Validates matchup data to ensure it has all required fields and valid dates.
+ * @param {Object} matchup - The matchup object to validate.
+ * @returns {{ isValid: boolean, error?: string, gameTime: Date }} Validation result.
  */
-const parseGameTime = (startTime) => {
-    if (!startTime) return null;
-
-    // Attempt to parse directly
-    let gameTime = startTime instanceof Date ? startTime : new Date(startTime);
-
-    // If direct parsing failed for a string, try replacing space with 'T'
-    if (isNaN(gameTime.getTime()) && typeof startTime === 'string' && startTime.includes(' ')) {
-        gameTime = new Date(startTime.replace(' ', 'T'));
+const validateMatchupData = (matchup) => {
+    if (!matchup) {
+        console.warn('No matchup data provided');
+        return { 
+            isValid: true, 
+            gameTime: new Date(Date.now() + 60 * 60 * 1000), // Fallback: 1 hour from now
+            error: 'No matchup data, using fallback time' 
+        };
     }
 
-    // If still invalid, provide a fallback time
+    if (!matchup.startTime) {
+        console.warn('No startTime in matchup:', matchup);
+        return { 
+            isValid: true, 
+            gameTime: new Date(Date.now() + 60 * 60 * 1000), 
+            error: 'No start time, using fallback time' 
+        };
+    }
+
+    let gameTime = matchup.startTime;
+    if (!(gameTime instanceof Date)) {
+        console.log('Parsing startTime string:', gameTime);
+        gameTime = new Date(gameTime);
+    }
+
     if (isNaN(gameTime.getTime())) {
-        console.warn('Fallback to 2h from now for game time parsing.');
-        return new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
+        console.warn('Invalid startTime format:', matchup.startTime);
+        gameTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
+        return { 
+            isValid: true, 
+            gameTime, 
+            error: 'Invalid startTime format, using fallback' 
+        };
     }
-    return gameTime;
+
+    console.log('✅ Validated matchup time:', gameTime.toISOString());
+    return { isValid: true, gameTime };
+};
+
+// === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
+const universalDateParser = (dateInput) => {
+    if (!dateInput) return null;
+    
+    // FORCE DESKTOP BEHAVIOR - ignore mobile differences
+    console.log('🔧 FORCING desktop behavior for:', dateInput);
+    
+    // If it's already a Date object, return it
+    if (dateInput instanceof Date) {
+        return isNaN(dateInput.getTime()) ? null : dateInput;
+    }
+    
+    // Convert to string and clean it
+    let dateString = String(dateInput).trim();
+    
+    // DESKTOP LOGIC ONLY - what works on desktop
+    try {
+        // Method 1: Direct parsing (desktop way)
+        let date = new Date(dateString);
+        if (!isNaN(date.getTime())) {
+            console.log('✅ Desktop direct parsing worked');
+            return date;
+        }
+        
+        // Method 2: Fix ESPN format (desktop way)
+        if (dateString.includes(' ') && !dateString.includes('T')) {
+            dateString = dateString.replace(' ', 'T');
+            date = new Date(dateString);
+            if (!isNaN(date.getTime())) {
+                console.log('✅ Desktop T-replacement worked');
+                return date;
+            }
+        }
+        
+        // Method 3: Force manual parsing if needed
+        const match = dateString.match(/(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
+        if (match) {
+            const [, year, month, day, hour, minute, second] = match;
+            // Create date exactly like desktop would
+            date = new Date(year, month - 1, day, hour, minute, second);
+            if (!isNaN(date.getTime())) {
+                console.log('✅ Manual parsing worked');
+                return date;
+            }
+        }
+        
+    } catch (error) {
+        console.error('Date parsing error:', error);
+    }
+    
+    console.error('❌ All parsing methods failed for:', dateInput);
+    return null;
 };
 
 // MOBILE DEBUG HELPER - Add this temporarily to see what's happening
@@ -426,12 +503,12 @@ const useSound = (soundEnabled) => {
 
         // Initialize AudioContext if not already
         if (typeof window !== 'undefined' && !audioContext.current) {
-    try {
-        audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
-    } catch (e) {
-        console.warn('AudioContext not supported:', e);
-    }
-}
+            try {
+                audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.warn('AudioContext not supported:', e);
+            }
+        }
 
         // Create a dummy buffer for all sounds instead of fetching actual files
         // This prevents 'Failed to parse URL' errors in environments without direct file access.
@@ -959,31 +1036,26 @@ const GAME_VALIDATION_RULES = {
  * @returns {{ valid: boolean, reason?: string }} Validation result.
  */
 const validateGameData = (gameData) => {
+    // Basic checks
     if (!gameData?.startTime || !gameData?.homeTeam?.name || !gameData?.awayTeam?.name) {
         return { valid: false, reason: 'Missing required data' };
     }
 
     const gameTime = new Date(gameData.startTime);
     const now = new Date();
-    const diffHours = (gameTime - now) / (1000 * 60 * 60);
-
-    if (isNaN(gameTime.getTime())) {
-        return { valid: false, reason: 'Invalid start time' };
-    }
-
-    if (diffHours < GAME_VALIDATION_RULES.MIN_HOURS_PAST || diffHours > GAME_VALIDATION_RULES.MAX_HOURS_FUTURE) {
-        return { valid: false, reason: `Outside valid time window (${GAME_VALIDATION_RULES.MIN_HOURS_PAST}h to ${GAME_VALIDATION_RULES.MAX_HOURS_FUTURE}h)` };
-    }
-
-    const gameHour = gameTime.getUTCHours(); // Use UTCHours for consistency with UTC-based date string logic if needed
-    if (gameHour < GAME_VALIDATION_RULES.MIN_HOUR_OF_DAY || gameHour > GAME_VALIDATION_RULES.MAX_HOUR_OF_DAY) {
-        return { valid: false, reason: `Invalid game hour (${gameHour})` };
+    
+    // Since ESPN now returns only current date's games, just check if it's in the future
+    const isFuture = gameTime > now;
+    
+    if (!isFuture) {
+        console.log(`⚠️ Game already started: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}`);
+        return { valid: false, reason: 'Already started' };
     }
 
     console.log('✅ VALID GAME:', {
         game: `${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`,
         time: gameTime.toLocaleTimeString(),
-        hoursFromNow: Math.round(diffHours * 10) / 10
+        minutesFromNow: Math.round((gameTime - now) / (1000 * 60))
     });
 
     return { valid: true };
@@ -2135,20 +2207,272 @@ const EmergencyFallback = () => (
     </div>
 );
 
-// --- Main App Component ---
-const App = ({ user }) => { // Accept user prop from Whop wrapper
-    const userId = user?.id || 'anonymous'; // Use Whop user ID for persistence
+// ========== FIX 2: STATE VERIFICATION HOOK ==========
+/**
+ * Hook to verify state updates are working correctly
+ */
+const useStateVerification = (todaysMatchup, isInitialized, matchupLoading) => {
+    useEffect(() => {
+        console.log('🔍 [STATE VERIFY] State changed:', {
+            todaysMatchup: todaysMatchup ? {
+                id: todaysMatchup.id,
+                homeTeam: todaysMatchup.homeTeam?.name,
+                awayTeam: todaysMatchup.awayTeam?.name,
+                startTime: todaysMatchup.startTime
+            } : null,
+            isInitialized,
+            matchupLoading,
+            timestamp: new Date().toISOString()
+        });
+    }, [todaysMatchup, isInitialized, matchupLoading]);
 
+    // Verify render state
+    useEffect(() => {
+        if (isInitialized && !matchupLoading) {
+            console.log('🎨 [RENDER VERIFY] Ready to render:', {
+                hasTodaysMatchup: !!todaysMatchup,
+                matchupTeams: todaysMatchup ? `${todaysMatchup.homeTeam?.name} vs ${todaysMatchup.awayTeam?.name}` : 'null',
+                isRealGame: todaysMatchup ? !todaysMatchup.id.includes('fallback') : false
+            });
+        }
+    }, [todaysMatchup, isInitialized, matchupLoading]);
+};
+
+// ========== FIX 3: ENHANCED LOADING CONDITION ==========
+/**
+ * More robust loading condition that prevents premature rendering
+ */
+const shouldShowLoading = (matchupLoading, isInitialized, todaysMatchup) => {
+    const loading = matchupLoading || !isInitialized || !todaysMatchup;
+    
+    console.log('🔄 [LOADING CHECK]:', {
+        matchupLoading,
+        isInitialized,
+        hasTodaysMatchup: !!todaysMatchup,
+        shouldLoad: loading,
+        matchupId: todaysMatchup?.id
+    });
+    
+    return loading;
+};
+
+// ========== FIX 4: RENDER DEBUGGING COMPONENT ==========
+/**
+ * Component to debug what's being rendered
+ */
+const RenderDebugger = ({ todaysMatchup, location }) => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    
+    console.log(`🎨 [RENDER ${location}] Matchup data:`, {
+        exists: !!todaysMatchup,
+        id: todaysMatchup?.id,
+        homeTeam: todaysMatchup?.homeTeam?.name,
+        awayTeam: todaysMatchup?.awayTeam?.name,
+        startTime: todaysMatchup?.startTime,
+        venue: todaysMatchup?.venue
+    });
+    
+    return (
+        <div style={{ 
+            position: 'fixed', 
+            bottom: '10px', 
+            left: '10px', 
+            background: 'rgba(0,0,0,0.8)', 
+            color: 'white', 
+            padding: '5px', 
+            fontSize: '10px',
+            zIndex: 9999,
+            borderRadius: '3px'
+        }}>
+            {location}: {todaysMatchup ? todaysMatchup.homeTeam?.name : 'NULL'}
+        </div>
+    );
+};
+
+// ========== FIX 5: HYDRATION-SAFE RENDERING ==========
+/**
+ * Hook to handle hydration issues in Next.js
+ */
+const useHydrationSafe = () => {
+    const [isHydrated, setIsHydrated] = useState(false);
+    
+    useEffect(() => {
+        setIsHydrated(true);
+        console.log('💧 [HYDRATION] Client hydrated');
+    }, []);
+    
+    return isHydrated;
+};
+
+// ========== FIX 6: GAMETIMEDISPLAY WITH ENHANCED DEBUGGING ==========
+/**
+ * Enhanced GameTimeDisplay with detailed mobile debugging
+ */
+const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
+    const [gameTime, setGameTime] = useState(null);
+    const [error, setError] = useState(null);
+    const [debugInfo, setDebugInfo] = useState({});
+
+    useEffect(() => {
+        console.log('⏰ [TIMER DEBUG] GameTimeDisplay received:', {
+            startTime,
+            type: typeof startTime,
+            matchupId,
+            timestamp: new Date().toISOString()
+        });
+
+        if (!startTime) {
+            console.warn('⚠️ [TIMER DEBUG] No startTime provided to GameTimeDisplay');
+            setTimeLeft('No start time');
+            setError('No start time provided');
+            return;
+        }
+
+        // Enhanced date parsing with debugging
+        let parsedTime = null;
+        const debugSteps = [];
+
+        try {
+            if (startTime instanceof Date) {
+                parsedTime = startTime;
+                debugSteps.push('Used existing Date object');
+            } else {
+                parsedTime = new Date(startTime);
+                debugSteps.push(`Parsed "${startTime}" to Date`);
+            }
+
+            if (isNaN(parsedTime.getTime())) {
+                throw new Error('Invalid date result');
+            }
+
+            debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
+            debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
+            
+            setGameTime(parsedTime);
+            setError(null);
+            setDebugInfo({ steps: debugSteps, success: true });
+            
+            console.log('✅ [TIMER DEBUG] Successfully parsed game time:', {
+                input: startTime,
+                output: parsedTime.toISOString(),
+                localTime: parsedTime.toLocaleString(),
+                steps: debugSteps
+            });
+
+        } catch (parseError) {
+            console.error('❌ [TIMER DEBUG] Date parsing failed:', parseError);
+            const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
+            setGameTime(fallbackTime);
+            setError(`Parse failed: ${parseError.message}`);
+            setDebugInfo({ steps: debugSteps, error: parseError.message });
+        }
+    }, [startTime, matchupId]);
+
+    // Enhanced timer logic with debugging
+    useEffect(() => {
+        if (!gameTime) return;
+
+        console.log('⏰ [TIMER DEBUG] Starting timer for:', gameTime.toISOString());
+        let isActive = true;
+
+        const updateTimer = () => {
+            if (!isActive) return;
+
+            const now = new Date();
+            const diff = gameTime - now;
+
+            console.log('⏰ [TIMER TICK]:', {
+                now: now.toISOString(),
+                gameTime: gameTime.toISOString(),
+                diff: diff,
+                diffMinutes: Math.round(diff / (1000 * 60))
+            });
+
+            if (diff <= 0) {
+                setTimeLeft('Game Started');
+                console.log('🏁 [TIMER DEBUG] Game has started');
+                return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            const timeString = `${hours}h ${minutes}m ${seconds}s`;
+            setTimeLeft(timeString);
+            
+            // Log every 10 seconds to avoid spam
+            if (seconds % 10 === 0) {
+                console.log('⏰ [TIMER DEBUG] Updated timer:', timeString);
+            }
+        };
+
+        updateTimer(); // Initial call
+        const intervalId = setInterval(updateTimer, 1000);
+
+        return () => {
+            console.log('⏰ [TIMER DEBUG] Cleaning up timer');
+            isActive = false;
+            clearInterval(intervalId);
+        };
+    }, [gameTime, setTimeLeft]);
+
+    if (!gameTime) {
+        return (
+            <div className="text-yellow-500">
+                ⏰ Loading game time...
+                {error && <div className="text-xs text-red-500">Error: {error}</div>}
+            </div>
+        );
+    }
+
+    return (
+        <div className="game-time-display">
+            <p className="timer-text text-sm text-text-secondary">
+                Game Time: {gameTime.toLocaleString('en-US', { 
+                    weekday: 'short', 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: 'numeric', 
+                    minute: '2-digit', 
+                    timeZoneName: 'short' 
+                })}
+            </p>
+            {error && (
+                <p className="text-xs text-yellow-500 mt-1">⚠️ {error}</p>
+            )}
+            {process.env.NODE_ENV === 'development' && debugInfo.steps && (
+                <details className="text-xs text-gray-500 mt-1">
+                    <summary>Debug Info</summary>
+                    <ul>
+                        {debugInfo.steps.map((step, i) => (
+                            <li key={i}>{step}</li>
+                        ))}
+                    </ul>
+                </details>
+            )}
+        </div>
+    );
+};
+
+
+// ========== FIX 7: COMPLETE APP COMPONENT WITH DEBUGGING ==========
+/**
+ * Modified App component with comprehensive debugging
+ */
+const App = ({ user }) => {
+    const userId = user?.id || 'anonymous';
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
+    
     // Share analytics state
     const [shareStats, setShareStats] = useLocalStorage('shareStats', {
         totalShares: 0,
         sharesByType: {},
         sharesByPlatform: {},
         lastShared: null
-    }, userId); // Pass userId to shareStats localStorage
+    }, userId); 
     // Game results history storage
-    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); // Pass userId to gameResults localStorage
+    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -2166,282 +2490,82 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     const [showShareModal, setShowShareModal] = useState(false); // State for share modal visibility
     const [showLeaderboard, setShowLeaderboard] = useState(false); // State for leaderboard modal visibility
     const [isStreakIncreasing, setIsStreakIncreasing] = useState(false); // For streak animation
+    const [timeLeft, setTimeLeft] = useState('');
+    const [gameStarted, setGameStarted] = useState(false); // New state for game started
 
 
-    // Initialize userState displayName and weeklyStats on first load or user change
+    // Add hydration safety
+    const isHydrated = useHydrationSafe();
+    
+    // Add state verification
+    useStateVerification(todaysMatchup, isInitialized, matchupLoading);
+    
+    // Enhanced matchup loading with debugging
     useEffect(() => {
-        // Add mobile debug info for development
-        if (process.env.NODE_ENV === 'development') {
-            mobileDebugInfo();
-        }
-
-        setUserState(prev => {
-            const updatedState = { ...prev };
-            let needsUpdate = false;
-
-            // Update display name from Whop account
-            const newDisplayName = getDisplayName(user);
-            if (prev.displayName !== newDisplayName) {
-                updatedState.displayName = newDisplayName;
-                needsUpdate = true;
-            }
-
-            // Initialize weekly stats if needed
-            if (!prev.weeklyStats || prev.weeklyStats.weekStart !== currentWeekMonday) {
-                updatedState.weeklyStats = {
-                    picks: 0,
-                    correct: 0,
-                    weekStart: currentWeekMonday
-                };
-                needsUpdate = true;
-            }
-
-            return needsUpdate ? updatedState : prev;
-        });
-    }, [user, currentWeekMonday, setUserState]);
-
-
-    // Load today's matchup (real or simulated)
-   useEffect(() => {
-    const loadTodaysMatchup = async () => {
-        setMatchupLoading(true); // Set loading true FIRST
-
-        try {
-            // Log current date strings for debugging
-            console.log('DEBUG: UserState Last Pick Date (from storage):', userState.lastPickDate);
-            console.log('DEBUG: Today String (UTC based):', today);
-            const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
-            console.log('DEBUG: Needs New Matchup:', needsNewMatchup);
-
-            let matchup = null;
-            if (needsNewMatchup) {
-                console.log('🔄 Loading new daily matchup...');
-                try {
-                    // OLD: const realMatchup = await fetchESPNData();
-                    const realMatchup = await fetchMLBData(); // NEW: Call fetchMLBData
-                    console.log('✅ Successfully loaded MLB matchup:', {
-                        game: `${realMatchup.homeTeam.name} vs ${realMatchup.awayTeam.name}`,
-                        sport: realMatchup.sport,
-                        isReal: !realMatchup.id.includes('fallback')
-                    });
-                    matchup = realMatchup;
-                } catch (mlbError) { // Changed error variable name
-                    console.error('🚨 MLB API failed, using simulation:', mlbError.message); // Changed log message
-                    matchup = generateSeasonalSimulation(new Date()); // Passing current date
-                }
-            } else {
-                console.log('📅 Regenerating today\'s matchup...');
-                // Ensure to pass a Date object derived from the stored ISO string for consistent seeding
-                try {
-                    // OLD: matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
-                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate)); // NEW: Call generateEnhancedDailyMatchup which now uses MLB
-                } catch (mlbError) { // Changed error variable name
-                    console.error('🚨 MLB API failed for existing date, using simulation:', mlbError.message); // Changed log message
-                    matchup = generateSeasonalSimulation(new Date(userState.lastPickDate));
-                }
-            }
+        const loadTodaysMatchup = async () => {
+            console.log('🔄 [MOBILE DEBUG] Starting matchup loading...');
+            console.log('🔍 [MOBILE DEBUG] Current state:', {
+                lastPickDate: userState.lastPickDate,
+                today: today,
+                needsNew: !userState.lastPickDate || userState.lastPickDate !== today,
+                isHydrated
+            });
             
-            setTodaysMatchup(matchup); // Set matchup once ready
-            
-        } catch (error) {
-            console.error('🚨 Complete matchup loading failure:', error);
-            // Ultimate fallback
-            const fallbackMatchup = {
-                id: 'emergency-fallback',
-                homeTeam: { name: 'Team A', abbr: 'TEA', logo: '🏠', colors: ['505050', '808080'] },
-                awayTeam: { name: 'Team B', abbr: 'TEB', logo: '✈️', colors: ['505050', '808080'] },
-                sport: 'Emergency',
-                venue: 'Fallback Arena',
-                startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now, as ISO string
-                status: 'upcoming'
-            };
-            setTodaysMatchup(fallbackMatchup);
-        } finally {
-            setMatchupLoading(false); // Set loading false LAST
-            setIsInitialized(true); // Always set true here after load or fallback
-        }
-    };
+            setMatchupLoading(true);
 
-    loadTodaysMatchup();
-}, [today, userState.lastPickDate]);
+            try {
+                const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
+                let matchup = null;
+                
+                if (needsNewMatchup) {
+                    console.log('🆕 [MOBILE DEBUG] Loading new daily matchup...');
+                    matchup = await generateEnhancedDailyMatchup(new Date());
+                } else {
+                    console.log('🔄 [MOBILE DEBUG] Regenerating existing matchup...');
+                    matchup = await generateEnhancedDailyDailyMatchup(new Date(userState.lastPickDate));
+                }
+                
+                // CRITICAL: Verify matchup before setting state
+                console.log('✅ [MOBILE DEBUG] Generated matchup:', {
+                    id: matchup.id,
+                    homeTeam: matchup.homeTeam.name,
+                    awayTeam: matchup.awayTeam.name,
+                    startTime: matchup.startTime,
+                    venue: matchup.venue,
+                    isRealGame: !matchup.id.includes('fallback')
+                });
+                
+                // Force a small delay to ensure state is processed
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                setTodaysMatchup(matchup);
+                console.log('🎯 [MOBILE DEBUG] Set todaysMatchup - waiting for state update...');
+                
+                // Verify state was set correctly after next tick
+                setTimeout(() => {
+                    console.log('🔍 [MOBILE DEBUG] Verifying state was set...');
+                }, 200);
+                
+                setIsInitialized(true);
+                
+            } catch (error) {
+                console.error('🚨 [MOBILE DEBUG] Matchup loading failed:', error);
+                // Don't use fallback - let it fail to see real issue
+                setTodaysMatchup(null);
+                setIsInitialized(true);
+            } finally {
+                setMatchupLoading(false);
+            }
+        };
+
+        if (isHydrated) {
+            loadTodaysMatchup();
+        }
+    }, [today, userState.lastPickDate, isHydrated]);
 
 
     // Determine if user has picked today (only if todaysMatchup is available)
     const hasPickedToday = todaysMatchup && userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.date === today;
-
-    // Game timer state
-    const [timeLeft, setTimeLeft] = useState('');
-    const [gameStarted, setGameStarted] = useState(false);
-
-    // ===== FIX 3: IMPLEMENT ROBUST GameTimeDisplay (Integrated into App for simplicity as per user's current file structure) =====
-    const GameTimeDisplay = ({ startTime, setTimeLeft }) => { // Accept setTimeLeft
-        const [gameTime, setGameTime] = useState(null);
-
-        useEffect(() => {
-            const parsedTime = parseGameTime(startTime);
-            if (!parsedTime) {
-                console.warn('GameTimeDisplay: No valid startTime provided, cannot display time.');
-                setTimeLeft('N/A');
-                return;
-            }
-            
-            console.log('GameTimeDisplay: Final gameTime (from parseGameTime):', parsedTime.toString());
-            setGameTime(parsedTime);
-
-            // Timer update logic, now passing updates to setTimeLeft prop
-            const updateTimer = () => {
-                const now = new Date();
-                const diff = parsedTime - now;
-
-                if (diff <= 0) {
-                    setTimeLeft('Game Started');
-                    return;
-                }
-
-                const hours = Math.floor(diff / (1000 * 60 * 60));
-                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-            };
-
-            updateTimer(); // Initial update
-            const intervalId = setInterval(updateTimer, 1000);
-
-            return () => clearInterval(intervalId);
-        }, [startTime, setTimeLeft]); // Add setTimeLeft to dependencies
-
-        if (!gameTime) {
-            return <div>Loading time...</div>;
-        }
-
-        return (
-            <div className="game-time-display">
-                <p className="timer-text text-sm text-text-secondary">
-                    Game Time: {gameTime.toLocaleString('en-US', { 
-                        weekday: 'short', 
-                        month: 'short', 
-                        day: 'numeric', 
-                        hour: 'numeric', 
-                        minute: '2-digit', 
-                        timeZoneName: 'short' 
-                    })}
-                </p>
-            </div>
-        );
-    };
-
-
-    // ===== FIX 3: BULLETPROOF TIMER LOGIC (REPLACED ORIGINAL useEffect) =====
-    useEffect(() => {
-    // Early validation
-    if (!todaysMatchup || !todaysMatchup.startTime) {
-        console.warn('Timer: No matchup or startTime available');
-        setTimeLeft('Loading...');
-        return;
-    }
-
-    const gameTime = parseGameTime(todaysMatchup.startTime);
-    if (!gameTime) {
-        console.error('Timer: Failed to parse game time, cannot set up timer.');
-        setTimeLeft('Timer error');
-        return;
-    }
-
-    console.log('Timer: Final gameTime (from parseGameTime):', gameTime);
-
-    let animationFrame;
-    let lastUpdate = 0;
-    let isComponentMounted = true;
-
-    const updateTimer = (timestamp) => {
-        if (!isComponentMounted) return;
-        
-        // Throttle updates
-        if (timestamp - lastUpdate >= 1000) {
-            try {
-                const now = Date.now();
-                const gameTimeMs = gameTime.getTime();
-                
-                // Validate timestamps
-                if (isNaN(now) || isNaN(gameTimeMs)) {
-                    console.error('Timer: Invalid timestamps', { now, gameTimeMs });
-                    setTimeLeft('Timer error');
-                    return;
-                }
-
-                const distance = gameTimeMs - now;
-
-                if (distance < 0) {
-                    setGameStarted(true);
-                    setTimeLeft('Game Started!');
-                    return;
-                }
-
-                // Safe math calculations
-                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-                // Validate calculations
-                if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
-                    console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
-                    setTimeLeft('Calculation error');
-                    return;
-                }
-
-                // Format time string
-                let timeString = '';
-                if (days > 0) {
-                    timeString = `${days}d ${hours}h ${minutes}m`;
-                } else if (hours > 0) {
-                    timeString = `${hours}h ${minutes}m ${seconds}s`;
-                } else if (minutes > 0) {
-                    timeString = `${minutes}m ${seconds}s`;
-                } else {
-                    timeString = `${seconds}s`;
-                }
-
-                setTimeLeft(timeString);
-                lastUpdate = timestamp;
-
-            } catch (error) {
-                console.error('Timer calculation error:', error);
-                setTimeLeft('Timer error');
-                return;
-            }
-        }
-
-        // Continue animation loop
-        if (isComponentMounted) {
-            animationFrame = requestAnimationFrame(updateTimer);
-        }
-    };
-
-    // Handle visibility changes
-    const handleVisibilityChange = () => {
-        if (!document.hidden && isComponentMounted) {
-            lastUpdate = 0;
-            animationFrame = requestAnimationFrame(updateTimer);
-        } else if (animationFrame) {
-            cancelAnimationFrame(animationFrame);
-        }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Initial update
-    animationFrame = requestAnimationFrame(updateTimer);
-
-    return () => {
-        isComponentMounted = false;
-        if (animationFrame) {
-            cancelAnimationFrame(animationFrame);
-        }
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-}, [todaysMatchup?.startTime]); // Depend on startTime specifically
-
 
     /**
      * Checks the actual result of a user's pick (REPLACES simulateResult)
@@ -2759,9 +2883,11 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
     ]);
 
 
-    // Show loading state while fetching
-    // Now also checks isInitialized to ensure full data is ready before showing main app
-    if (matchupLoading || !isInitialized) { 
+    // Debug render conditions
+    const loading = shouldShowLoading(matchupLoading, isInitialized, todaysMatchup);
+    
+    if (!isHydrated || loading) {
+        console.log('🔄 [RENDER] Showing loading state:', { isHydrated, loading, matchupLoading, isInitialized, hasTodaysMatchup: !!todaysMatchup });
         return (
             <div className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center justify-center transition-colors duration-300">
                 <style>
@@ -2795,13 +2921,23 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                 </style>
                 <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mb-4"></div>
                 <h2 className="text-xl font-bold mb-2">Loading Daily Matchup...</h2>
-                <p className="text-text-secondary">Please wait while we fetch the latest games.</p>
+                <p className="text-text-secondary">
+                    Hydrated: {isHydrated ? '✅' : '❌'} | 
+                    Loading: {matchupLoading ? '✅' : '❌'} | 
+                    Initialized: {isInitialized ? '✅' : '❌'} | 
+                    Has Matchup: {todaysMatchup ? '✅' : '❌'}
+                </p>
             </div>
         );
     }
     
-    // ===== FIX 4: SAFE MATCHUP DATA VALIDATION (Integrated into render logic) =====
-    const validation = validateMatchupData(todaysMatchup);
+    // Final render verification
+    console.log('🎨 [FINAL RENDER] About to render with:', {
+        matchupId: todaysMatchup?.id,
+        homeTeam: todaysMatchup?.homeTeam?.name,
+        awayTeam: todaysMatchup?.awayTeam?.name,
+        startTime: todaysMatchup?.startTime
+    });
 
 
     // Enhanced Header Component
@@ -3280,19 +3416,6 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                     }
                 }
 
-                /* Remove iOS Safari specific fixes for timer, as instructed */
-                /*
-                @supports (-webkit-appearance: none) {
-                    .timer-text {
-                        -webkit-transform: translateZ(0);
-                        -webkit-backface-visibility: hidden;
-                    }
-                    .timer-display {
-                        transform: translateZ(0);
-                        will-change: contents;
-                    }
-                }
-                */
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3340,42 +3463,33 @@ const App = ({ user }) => { // Accept user prop from Whop wrapper
                         />
                     </div>
 
-                    {/* Game Time Display - UPDATED */}
-                    <div className="text-center mb-6 px-6"> {/* Added padding to align */}
-                        {/* Show actual game time */}
-                        {todaysMatchup?.startTime ? ( // Simplified condition
-                            <>
-                                <GameTimeDisplay startTime={todaysMatchup.startTime} setTimeLeft={setTimeLeft} /> {/* Pass setTimeLeft */}
-                                {validation.error && ( // Display error as a secondary message
-                                    <div className="text-center text-sm text-yellow-500 mt-2">
-                                        ⚠️ {validation.error}
-                                    </div>
-                                )}
-                            </>
+                    {/* Enhanced Game Time Display */}
+                    <div className="text-center mb-6 px-6">
+                        {todaysMatchup?.startTime ? (
+                            <EnhancedGameTimeDisplay 
+                                startTime={todaysMatchup.startTime} 
+                                setTimeLeft={setTimeLeft}
+                                matchupId={todaysMatchup.id}
+                            />
                         ) : (
-                            <div className="text-center text-sm text-red-500 mb-2">
-                                ⚠️ No game time available
-                            </div>
+                            <div className="text-red-500">⚠️ No game time available</div>
                         )}
-
-                        {/* Show countdown */}
+                        
                         <p className="text-lg font-semibold text-text-primary">
-                            {gameStarted ? (
-                                <span className="text-red-500">🔴 Game Started!</span>
-                            ) : (
-                                <span className="text-green-500">
-                                    ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
-                                </span>
-                            )}
+                            ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
                         </p>
-
-                        {/* Debug info (remove after testing) */}
-                        {process.env.NODE_ENV === 'development' && (
-                            <div className="mt-2 text-xs text-text-secondary">
-                                <p>Debug: {new Date(todaysMatchup.startTime).toLocaleString()}</p>
-                            </div>
-                        )}
                     </div>
+                    
+                    {/* Debug info in development */}
+                    {process.env.NODE_ENV === 'development' && (
+                        <div className="bg-gray-800 text-white p-2 rounded text-xs mb-4">
+                            <strong>Debug Info:</strong><br/>
+                            Matchup ID: {todaysMatchup?.id}<br/>
+                            Teams: {todaysMatchup?.homeTeam?.name} vs {todaysMatchup?.awayTeam?.name}<br/>
+                            Start Time: {todaysMatchup?.startTime}<br/>
+                            Time Left: {timeLeft}
+                        </div>
+                    )}
 
                     {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
                     {(hasPickedToday || gameStarted) && (
