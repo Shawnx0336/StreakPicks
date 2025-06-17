@@ -228,17 +228,6 @@ const getDisplayName = (user) => {
 };
 
 /**
- * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
- * IMPORTANT: This now uses UTC date components for global consistency.
- * @returns {string} Date string in 'YYYY-MM-DD' format.
- */
-const getTodayDateString = () => {
-    const now = new Date();
-    // Use UTC date components to ensure consistency across timezones for the "day"
-    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
-};
-
-/**
  * Checks if a Date object is valid.
  * @param {Date} date - The Date object to check.
  * @returns {boolean} True if the date is valid, false otherwise.
@@ -315,14 +304,13 @@ const getMLBTeamColors = (abbr) => {
  */
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
-    console.log('📱 Platform Info:', {
-        userAgent: navigator.userAgent.substring(0, 50),
-        platform: navigator.platform,
-        today: getTodayDateString(),
-        timestamp: new Date().toISOString()
+    // Removed platform-specific logging details as per "no platform detection" rule
+    console.log('✨ Environment Info:', {
+        todayDate: new Date().toISOString().split('T')[0],
+        currentTime: new Date().toISOString()
     });
     
-    const today = getTodayDateString(); // Use your existing UTC function
+    const today = new Date().toISOString().split('T')[0]; // Simple and universal date
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
     
     console.log('📡 Fetching from:', apiUrl);
@@ -331,11 +319,13 @@ const getTodaysMLBGame = async () => {
         const response = await fetch(apiUrl, {
             headers: {
                 'Accept': 'application/json',
-                'User-Agent': 'StreakPickem/1.0'
+                // Removed 'User-Agent' header to let the browser send its default.
+                // This improves universality and avoids potential API rejections.
             }
         });
         
         if (!response.ok) {
+            console.error(`❌ MLB API returned non-OK response: Status ${response.status}, Text: ${response.statusText}`);
             throw new Error(`MLB API returned ${response.status}: ${response.statusText}`);
         }
         
@@ -344,6 +334,7 @@ const getTodaysMLBGame = async () => {
         
         // STRICT VALIDATION - NO MERCY
         if (!data?.dates?.[0]?.games?.length) {
+            console.error(`❌ No MLB games found for ${today} in API response.`);
             throw new Error(`No MLB games found for ${today}`);
         }
         
@@ -373,7 +364,8 @@ const getTodaysMLBGame = async () => {
         };
         
     } catch (error) {
-        console.error('❌ MLB API FAILED:', error.message);
+        // Log the full error object for better debugging
+        console.error('❌ MLB API FAILED:', error); 
         throw error; // DON'T CATCH - LET IT FAIL
     }
 };
@@ -484,11 +476,11 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
             if (keyPrefix === 'streakPickemUser') {
                 let updatedParsedItem = { ...parsedItem };
                 
-                // FORCE consistent date comparison
-                const currentDate = getTodayDateString();
+                // FORCE consistent date comparison using simple ISO string
+                const currentDate = new Date().toISOString().split('T')[0];
                 const storedDate = updatedParsedItem.lastPickDate;
                 
-                console.log('Date comparison:', { currentDate, storedDate, different: storedDate !== currentDate });
+                console.log('Date comparison for reset:', { currentDate, storedDate, different: storedDate !== currentDate });
 
                 // Reset todaysPick and update lastPickDate if it's a new day
                 if (storedDate !== currentDate) {
@@ -823,10 +815,8 @@ const generateShareText = (userState, todaysMatchup = null, shareType = 'streak'
                 return `Just started my streak on Streak Pick'em! 🎯\n\nWho can predict sports better than me? 💪\n\nTry it: ${appUrl}`;
             } else if (userState.currentStreak < 5) {
                 return `${userState.currentStreak}-day streak and counting! ${streakEmoji}\n\nThink you can do better? Prove it 👀\n\nStreak Pick'em: ${appUrl}`;
-            } else if (userState.currentStreak < 10) {
+            } else { // >=5 streak
                 return `🔥 ${userState.currentStreak}-day streak! I'm on fire! ${streakEmoji}\n\nCan anyone beat this? Challenge accepted? 😏\n\nStreak Pick'em: ${appUrl}`;
-            } else {
-                return `🚨 INSANE ${userState.currentStreak}-DAY STREAK! 🚨\n\nI'm basically a sports oracle at this point 🔮\n\nThink you can match this? Good luck 😤\n\nStreak Pick'em: ${appUrl}`;
             }
 
         case 'pick':
@@ -1523,7 +1513,8 @@ const ErrorDisplay = ({ message }) => (
 const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
-    const [debugInfo, setDebugInfo] = useState({});
+    // Removed debugInfo state as platform-specific info is no longer desired in logs
+    // [debugInfo, setDebugInfo] = useState({});
 
     useEffect(() => {
         if (!startTime) {
@@ -1532,22 +1523,24 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             return;
         }
 
-        // Enhanced date parsing with debugging
+        // Ensured robust date parsing
         let parsedTime = null;
-        const debugSteps = [];
+        // Removed debugSteps as platform-specific info is no longer desired in logs
+        // const debugSteps = [];
 
         try {
             parsedTime = new Date(startTime);
             if (isNaN(parsedTime.getTime())) {
                 throw new Error('Invalid date');
             }
-            debugSteps.push(`Parsed "${startTime}" to Date`);
-            debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
-            debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
+            // Removed debugSteps logging
+            // debugSteps.push(`Parsed "${startTime}" to Date`);
+            // debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
+            // debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
             
             setGameTime(parsedTime);
             setError(null);
-            setDebugInfo({ steps: debugSteps, success: true });
+            // setDebugInfo({ steps: debugSteps, success: true });
             
 
         } catch (parseError) {
@@ -1555,7 +1548,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
             setGameTime(fallbackTime);
             setError(`Parse failed: ${parseError.message}`);
-            setDebugInfo({ steps: debugSteps, error: parseError.message });
+            // setDebugInfo({ steps: debugSteps, error: parseError.message });
         }
     }, [startTime, matchupId]);
 
@@ -1648,8 +1641,9 @@ const App = ({ user }) => {
     const { playSound } = useSound(userState.soundEnabled);
     const { addNotification, notifications, dismissNotification } = useNotifications();
 
-    const today = getTodayDateString(); // Use the new reliable date string (UTC-based)
-    const currentWeekMonday = getMondayOfCurrentWeek();
+    // Use simple, universal date string for comparison
+    const today = new Date().toISOString().split('T')[0]; 
+    const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based
 
     const [todaysMatchup, setTodaysMatchup] = useState(null);
     const [matchupLoading, setMatchupLoading] = useState(true);
@@ -2046,25 +2040,7 @@ const App = ({ user }) => {
         updateLeaderboard
     ]);
 
-    // Add this to your App component for testing
-    const debugPlatform = () => {
-        console.log('🔍 PLATFORM DEBUG:', {
-            todayDateString: getTodayDateString(),
-            currentDate: new Date().toISOString().split('T')[0],
-            userAgent: navigator.userAgent.substring(0, 50),
-            platform: navigator.platform,
-            gameLoaded: !!todaysMatchup,
-            gameId: todaysMatchup?.id,
-            gameTeams: todaysMatchup ? `${todaysMatchup.homeTeam.abbr} vs ${todaysMatchup.awayTeam.abbr}` : 'none'
-        });
-    };
-
-    // Call this in useEffect after game loads:
-    useEffect(() => {
-        if (todaysMatchup) {
-            debugPlatform();
-        }
-    }, [todaysMatchup]);
+    // Removed debugPlatform function and its call as per "no platform detection" rule.
 
 
     // Simple loading check - no complex logic
@@ -2139,10 +2115,11 @@ const App = ({ user }) => {
                 <div className="text-center p-6">
                     <h2 className="text-2xl font-bold mb-4">No Games Available</h2>
                     <p className="text-text-secondary mb-4">
-                        No MLB games found for {getTodayDateString()}
+                        No MLB games found for {new Date().toISOString().split('T')[0]}.
                     </p>
                     <p className="text-xs text-text-secondary mb-6">
-                        Platform: {navigator.platform} | Time: {new Date().toLocaleString()}
+                        This could mean it's an off-day or there's an API issue.
+                        Please ensure your mobile browser is not requesting a "Desktop Site".
                     </p>
                     <button
                         onClick={() => window.location.reload()}
