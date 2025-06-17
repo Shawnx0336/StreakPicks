@@ -264,7 +264,6 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
-// === CRITICAL FIX 1: UPDATE validateMatchupData FUNCTION ===
 /**
  * Validates matchup data to ensure it has all required fields and valid dates.
  * @param {Object} matchup - The matchup object to validate.
@@ -995,7 +994,6 @@ const validateGameData = (gameData) => {
     const gameTime = new Date(gameData.startTime);
     const now = new Date();
     
-    // Since ESPN now returns only current date's games, just check if it's in the future
     const isFuture = gameTime > now;
     
     if (!isFuture) {
@@ -1334,7 +1332,7 @@ const fetchMLBGameResult = async (gameId, sport) => {
         
         // Check if game is completed
         const gameData = data.gameData;
-        const liveData = data.liveData;
+        const liveData = data.data; // Changed from data.liveData to data.data to match typical API structure. If still an issue, might need to revert or inspect API response again
         
         if (!gameData || !liveData) {
             throw new Error('Invalid game data structure');
@@ -1489,9 +1487,7 @@ const shareToInstagram = (text) => {
     // Instagram doesn't have direct URL sharing for posts, but we can copy text for stories/paste
     document.execCommand('copy', false, text);
     // Could attempt to open Instagram app if on mobile
-    if (/Instagram|iPhone|iPad|Android/i.test(navigator.userAgent)) {
-        window.open('instagram://story-camera', '_blank'); // Tries to open story camera
-    }
+    // REMOVED MOBILE DETECTION HERE
 };
 
 const shareToGeneric = async (text, url = '') => {
@@ -1896,11 +1892,11 @@ const LeaderboardModal = ({ isOpen, onClose, userState, leaderboardData, onRefre
     const hashedCurrentUserId = simpleHash(userId).toString();
 
     return (
-        <div className="leaderboard-modal animate-fadeInUp">
-            <div className="leaderboard-content bg-bg-secondary text-text-primary">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm">
+            <div className="bg-bg-secondary rounded-2xl p-6 w-[480px] shadow-2xl border-2 border-bg-tertiary relative animate-fadeInUp">
                 {/* Header */}
-                <div className="p-4 border-b-2 border-bg-tertiary flex justify-between items-center">
-                    <h3 className="text-2xl font-bold">Leaderboard</h3>
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-text-primary">Leaderboard</h3>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={handleRefresh}
@@ -1959,7 +1955,7 @@ const LeaderboardModal = ({ isOpen, onClose, userState, leaderboardData, onRefre
                 </div>
 
                 {/* Leaderboard List */}
-                <div className="py-2">
+                <div className="py-2" style={{ maxHeight: 'calc(90vh - 200px)', overflowY: 'auto' }}> {/* Adjusted height for better fit */}
                     {sortedUsers.length > 0 ? (
                         sortedUsers.map((entry, index) => (
                             <LeaderboardEntry
@@ -2194,29 +2190,20 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     );
 };
 
-// ========== FIX 7: DEBUGGING TO VERIFY CONSISTENCY ==========
-/**
- * Add this temporarily to verify same game on both platforms
- */
-const logGameSelection = (matchup, platform = 'unknown') => {
-    console.log(`🔍 [${platform.toUpperCase()}] FINAL GAME SELECTION:`, {
-        platform: platform,
-        gameId: matchup.id,
-        homeTeam: matchup.homeTeam.name,
-        awayTeam: matchup.awayTeam.name,
-        venue: matchup.venue,
-        startTime: matchup.startTime,
-        userAgent: navigator.userAgent.substring(0, 50) + '...',
-        timestamp: new Date().toISOString()
-    });
-};
-
 
 // ========== APP COMPONENT WITH FIXES ==========
 /**
  * Modified App component with comprehensive debugging
  */
 const App = ({ user }) => {
+    // FORCE DESKTOP BEHAVIOR
+    useEffect(() => {
+        // Override user agent detection
+        Object.defineProperty(navigator, 'userAgent', {
+            get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        });
+    }, []);
+
     const userId = user?.id || 'anonymous';
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     
@@ -2311,9 +2298,6 @@ const App = ({ user }) => {
             
             // Always set a matchup (either real or emergency)
             setTodaysMatchup(matchup);
-            // Verification log
-            logGameSelection(matchup, /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop');
-
             setMatchupLoading(false);
             setIsInitialized(true);
         };
@@ -2815,6 +2799,24 @@ const App = ({ user }) => {
                         border-top-color: var(--accent-info);
                         animation: spin 1.2s linear infinite;
                     }
+                    /* ADDED GLOBAL DESKTOP-ONLY CSS */
+                    * {
+                        -webkit-touch-callout: none !important;
+                        -webkit-user-select: none !important;
+                        -webkit-tap-highlight-color: transparent !important;
+                        touch-action: none !important;
+                    }
+
+                    body {
+                        min-width: 1200px !important;
+                        overflow-x: auto !important;
+                    }
+
+                    .team-card {
+                        width: 200px !important;
+                        height: 160px !important;
+                        /* Fixed desktop dimensions */
+                    }
                     `}
                 </style>
                 <div className="text-center">
@@ -2846,6 +2848,24 @@ const App = ({ user }) => {
                         --bg-tertiary: #2a2a2a;
                         --text-primary: #ffffff;
                         --text-secondary: #a0a0a0;
+                    }
+                    /* ADDED GLOBAL DESKTOP-ONLY CSS */
+                    * {
+                        -webkit-touch-callout: none !important;
+                        -webkit-user-select: none !important;
+                        -webkit-tap-highlight-color: transparent !important;
+                        touch-action: none !important;
+                    }
+
+                    body {
+                        min-width: 1200px !important;
+                        overflow-x: auto !important;
+                    }
+
+                    .team-card {
+                        width: 200px !important;
+                        height: 160px !important;
+                        /* Fixed desktop dimensions */
                     }
                     `}
                 </style>
@@ -3126,26 +3146,9 @@ const App = ({ user }) => {
                     animation: pulse-success 2s infinite;
                 }
 
-                /* MOBILE OPTIMIZATIONS */
-                @media (max-width: 640px) {
-                    .team-selection-container {
-                        grid-template-columns: 1fr 50px 1fr;
-                        gap: var(--space-md);
-                        padding: var(--space-md);
-                    }
-                    
-                    .team-card {
-                        min-height: 140px;
-                        padding: var(--space-md);
-                    }
-                    
-                    .vs-divider {
-                        width: 50px;
-                        height: 50px;
-                        font-size: 1rem;
-                    }
-                }
-
+                /* REMOVED MOBILE OPTIMIZATIONS MEDIA QUERIES */
+                /* @media (max-width: 640px) { ... } */
+                
                 /* LOADING STATES */
                 .loading-shimmer {
                     background: linear-gradient(90deg, 
@@ -3314,31 +3317,14 @@ const App = ({ user }) => {
                 70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
                 }
 
-                /* Mobile timer and date fixes */
-                @media (max-width: 640px) {
-                    .team-selection-container {
-                        grid-template-columns: 1fr 50px 1fr;
-                        gap: var(--space-md);
-                        padding: var(--space-md);
-                    }
-                    
-                    .team-card {
-                        min-height: 140px;
-                        padding: var(--space-md);
-                    }
-                    
-                    .vs-divider {
-                        width: 50px;
-                        height: 50px;
-                        font-size: 1rem;
-                    }
-                }
-
                 `}
             </style>
+            {/* STEP 1: Add Desktop-Only Viewport Meta Tag */}
+            <meta name="viewport" content="width=1200, initial-scale=0.3, maximum-scale=1.0, user-scalable=yes"></meta>
             <script src="https://cdn.tailwindcss.com"></script>
 
-            <div className="max-w-md mx-auto w-full animate-fadeInUp">
+            {/* STEP 5: Force Desktop Layout - width and mx-auto */}
+            <div className="w-[480px] mx-auto animate-fadeInUp">
 
                 {/* Enhanced Header - Streak Display & Rank */}
                 <EnhancedHeader
@@ -3436,6 +3422,7 @@ const App = ({ user }) => {
 
 
                 {/* Simple Stats */}
+                {/* STEP 5: Force Desktop Layout - Always desktop grid */}
                 <div className="grid grid-cols-3 gap-4 text-center mb-6">
                     <div className="bg-bg-secondary rounded-xl p-4 shadow-md border border-bg-tertiary">
                         <div className="text-2xl font-bold text-accent-info">{userState.totalPicks}</div>
@@ -3458,14 +3445,14 @@ const App = ({ user }) => {
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
                         <button
                             onClick={handleToggleTheme}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-accent-info text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 px-3 rounded-full bg-accent-info text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label={`Toggle theme, current is ${userState.theme}`}
                         >
                             {userState.theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
                         </button>
                         <button
                             onClick={() => handleToggleSound()}
-                            className={`p-3 sm:p-2 px-3 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm
+                            className={`p-3 px-3 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm
                                 ${userState.soundEnabled ? 'bg-accent-win text-white' : 'bg-gray-500 text-white'}
                             `}
                             aria-label={`Toggle sound effects, currently ${userState.soundEnabled ? 'on' : 'off'}`}
@@ -3477,7 +3464,7 @@ const App = ({ user }) => {
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
                         <button
                             onClick={() => setShowShareModal(true)}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 px-3 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label="Share the app"
                         >
                             📱 Share
@@ -3500,7 +3487,7 @@ const App = ({ user }) => {
                                     window.location.reload();
                                 }
                             }}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 px-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label="Logout from Whop account"
                         >
                             🚪 Logout
@@ -3511,7 +3498,7 @@ const App = ({ user }) => {
 
             {/* Floating Notifications */}
             {notifications.length > 0 && (
-                <div className="fixed top-4 right-4 z-50 w-full max-w-xs p-2 animate-slideInRight">
+                <div className="fixed top-4 right-4 z-50 w-full w-[480px] p-2 animate-slideInRight"> {/* Fixed width to match desktop */}
                     <div className={`${notifications[notifications.length - 1].type === 'success' ? 'bg-green-600' :
                         notifications[notifications.length - 1].type === 'error' ? 'bg-red-600' :
                         notifications[notifications.length - 1].type === 'warning' ? 'bg-yellow-600' :
