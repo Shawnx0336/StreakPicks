@@ -2795,7 +2795,7 @@ const App = ({ user }) => {
             <div className="text-center mb-8 pt-8 w-full">
                 <div className="flex justify-between items-center mb-4 px-4">
                     <RankBadge rank={userRank} streak={userState.currentStreak} className="min-w-[90px]"/>
-                    <h1 className="text-3xl font-bold text-text-primary text-center flex-1">Streak Pick'em</h1>
+                    <h1 className="text-3xl font-bold text-text-primary text-center flex-1">Streak Picks</h1>
                     <button
                         onClick={onOpenLeaderboard}
                         className="leaderboard-btn text-3xl p-2 rounded-full hover:bg-bg-tertiary transition-colors"
