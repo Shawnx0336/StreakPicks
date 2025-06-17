@@ -1797,6 +1797,33 @@ const ChevronRight = () => (
 );
 
 
+// ADD: Status badges for each game state
+const GameStatusBadge = ({ game, userPick, gameStarted, gameResult }) => {
+    if (gameResult) {
+        const isCorrect = userPick?.selectedTeam === gameResult.winner;
+        return (
+            <div className={`status-badge ${isCorrect ? 'correct' : 'incorrect'}`}>
+                {isCorrect ? '✅ Correct' : '❌ Wrong'}
+            </div>
+        );
+    }
+    
+    if (userPick && userPick.isSubmitted) { // Check if pick is submitted
+        return (
+            <div className="status-badge picked">
+                ✅ Picked: {userPick.selectedTeam === 'home' ? game.homeTeam.abbr : game.awayTeam.abbr}
+            </div>
+        );
+    }
+    
+    if (gameStarted) {
+        return <div className="status-badge locked">🔒 Game Started</div>;
+    }
+    
+    return <div className="status-badge available">⚡ Make Your Pick</div>;
+};
+
+
 /**
  * GameCard Component
  * @param {Object} props
@@ -1834,7 +1861,7 @@ const GameCard = ({ game, isActive, userPick, onPick, disabled, timeLeft, setTim
                     ) : (
                         <div className="text-red-500">⚠️ No game time available</div>
                     )}
-                    <p className="text-lg font-semibold text-text-primary">
+                    <p className="game-time-large">
                         ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
                     </p>
                 </div>
@@ -1860,36 +1887,36 @@ const GameCard = ({ game, isActive, userPick, onPick, disabled, timeLeft, setTim
             </div>
             
             {/* Pick status or Game Result */}
-            {gameResult ? (
-                <GameResultDisplay 
-                    result={gameResult} 
-                    game={game} 
-                    userPick={userPick} 
-                />
-            ) : hasPickedThisGame ? (
-                <div className="pick-status text-center p-3 mt-4 bg-bg-tertiary rounded-xl">
-                    ✅ You picked: {userPick.selectedTeam === 'home' ? game.homeTeam.abbr : game.awayTeam.abbr}
-                    <p className="text-sm text-text-secondary mt-1">Waiting for game to finish...</p>
-                    {gameStarted && !gameResult && (
-                        <div className="mt-3">
-                            {resultLoading ? (
-                                <p className="text-sm text-text-secondary">🔍 Checking game result...</p>
-                            ) : (
-                                <button
-                                    onClick={() => fetchAndDisplayResult(game.gamePk, game.sport, game.startTime, game.id)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm"
-                                >
-                                    🔍 Check Result
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            ) : gameStarted ? (
-                <div className="pick-status text-center p-3 mt-4 bg-red-100 dark:bg-red-900/30 rounded-xl text-red-700 dark:text-red-400">
-                    🔒 Game has started! No picks allowed.
-                </div>
-            ) : null}
+            <div className="text-center">
+                {gameResult ? (
+                    <GameResultDisplay 
+                        result={gameResult} 
+                        game={game} 
+                        userPick={userPick} 
+                    />
+                ) : (
+                    <GameStatusBadge 
+                        game={game} 
+                        userPick={userPick} 
+                        gameStarted={gameStarted} 
+                        gameResult={gameResult} 
+                    />
+                )}
+                {gameStarted && !gameResult && userPick?.isSubmitted && (
+                    <div className="mt-3">
+                        {resultLoading ? (
+                            <p className="text-sm text-text-secondary">🔍 Checking game result...</p>
+                        ) : (
+                            <button
+                                onClick={() => fetchAndDisplayResult(game.gamePk, game.sport, game.startTime, game.id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                            >
+                                🔍 Check Result
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
@@ -1930,13 +1957,14 @@ const GameCarousel = ({
     // Implement swipe detection
     const [startX, setStartX] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
+    const carouselTrackRef = useRef(null);
     
-    const handleTouchStart = (e) => {
+    const handleTouchStart = useCallback((e) => {
         setStartX(e.touches[0].clientX);
         setIsDragging(true);
-    };
+    }, []);
     
-    const handleTouchEnd = (e) => {
+    const handleTouchEnd = useCallback((e) => {
         if (!isDragging) return;
         const endX = e.changedTouches[0].clientX;
         const diff = startX - endX;
@@ -1949,7 +1977,19 @@ const GameCarousel = ({
             }
         }
         setIsDragging(false);
-    };
+    }, [isDragging, startX, currentIndex, games.length, onIndexChange]);
+
+    // Apply/remove dragging class for transition control
+    useEffect(() => {
+        const trackElement = carouselTrackRef.current;
+        if (trackElement) {
+            if (isDragging) {
+                trackElement.classList.add('dragging');
+            } else {
+                trackElement.classList.remove('dragging');
+            }
+        }
+    }, [isDragging]);
     
     return (
         <div className="game-carousel-container">
@@ -1958,22 +1998,24 @@ const GameCarousel = ({
                 onClick={() => onIndexChange(Math.max(0, currentIndex - 1))}
                 disabled={currentIndex === 0}
                 className="carousel-arrow left"
+                aria-label="Previous game"
             >
                 <ChevronLeft />
             </button>
             
             {/* Swipeable card container */}
             <div 
-                className="carousel-viewport"
+                className={`carousel-viewport ${isDragging ? 'swiping' : ''}`}
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
             >
                 <div 
+                    ref={carouselTrackRef}
                     className="carousel-track"
                     style={{
                         width: `${games.length * 100}%`, // Dynamically set track width
                         transform: `translateX(-${currentIndex * (100 / games.length)}%)`, // Adjust for dynamic width
-                        transition: isDragging ? 'none' : 'transform 0.3s ease-out'
+                        // transition handled by CSS class based on isDragging
                     }}
                 >
                     {games.map((game, index) => (
@@ -1983,7 +2025,7 @@ const GameCarousel = ({
                                 isActive={index === currentIndex}
                                 userPick={picks[game.id]}
                                 onPick={onPick}
-                                disabled={disabled}
+                                disabled={false} // Individual GameCard will handle its own disabled state
                                 timeLeft={timeStates[game.id] || ''}
                                 setTimeLeft={(time) => setTimeStates(prev => ({ ...prev, [game.id]: time }))}
                                 gameStarted={gameStartedStates[game.id] || false}
@@ -2001,6 +2043,7 @@ const GameCarousel = ({
                 onClick={() => onIndexChange(Math.min(games.length - 1, currentIndex + 1))}
                 disabled={currentIndex === games.length - 1}
                 className="carousel-arrow right"
+                aria-label="Next game"
             >
                 <ChevronRight />
             </button>
@@ -2012,7 +2055,10 @@ const GameCarousel = ({
                         key={index}
                         onClick={() => onIndexChange(index)}
                         className={`indicator ${index === currentIndex ? 'active' : ''}`}
-                    />
+                        aria-label={`Go to game ${index + 1}`}
+                    >
+                        <span className="dot-visual"></span>
+                    </button>
                 ))}
             </div>
         </div>
@@ -2154,8 +2200,8 @@ const App = ({ user }) => {
         }
 
         // Check if pick already made for this specific game
-        if (dailyPicks[gameId] && dailyPicks[gameId].date === today) {
-            addNotification({ type: 'warning', message: 'You have already picked for this game!' });
+        if (dailyPicks[gameId] && dailyPicks[gameId].date === today && dailyPicks[gameId].isSubmitted) { // Only prevent if already submitted for today
+            addNotification({ type: 'warning', message: 'You have already submitted a pick for this game!' });
             playSound('button_click');
             return;
         }
@@ -2216,7 +2262,7 @@ const App = ({ user }) => {
 
             for (const gameId in dailyPicks) {
                 const pick = dailyPicks[gameId];
-                if (!prev.todaysPicks[gameId] || prev.todaysPicks[gameId].date !== today) { // Only count new picks or updated picks for today
+                if (!pick.isSubmitted) { // Only count if not already submitted
                     newTotalPicks++;
                     newWeeklyPicks++;
                 }
@@ -2235,16 +2281,21 @@ const App = ({ user }) => {
             };
         });
 
-        // Clear dailyPicks from local storage after submission (or it will persist)
-        // No, keep dailyPicks in localStorage until the next day reset or results are processed
-        // setDailyPicks({}); // This would clear the temp picks. Let `useLocalStorage` handle daily reset.
+        // Update dailyPicks to mark them as submitted in localStorage as well
+        setDailyPicks(prev => {
+            const updatedPicks = {};
+            for (const gameId in prev) {
+                updatedPicks[gameId] = { ...prev[gameId], isSubmitted: true };
+            }
+            return updatedPicks;
+        });
 
         addNotification({ 
             type: 'success', 
             message: `${picksToSubmitCount} pick${picksToSubmitCount > 1 ? 's' : ''} submitted!` 
         });
         playSound('achievement_unlock');
-    }, [dailyPicks, setUserState, today, addNotification, playSound]);
+    }, [dailyPicks, setUserState, today, addNotification, playSound, setDailyPicks]);
 
 
     /**
@@ -2293,7 +2344,7 @@ const App = ({ user }) => {
                         let newWeeklyCorrect = prev.weeklyStats.correct;
 
                         // Only update streak if it was a pending pick for today and not already checked
-                        if (prev.lastPickDate === today && prev.todaysPicks[gameId]) {
+                        if (prev.lastPickDate === today && prev.todaysPicks[gameId] && !prev.todaysPicks[gameId].isResultChecked) {
                             newCorrectPicks += (isCorrect ? 1 : 0);
                             newWeeklyCorrect += (isCorrect ? 1 : 0);
 
@@ -2327,6 +2378,12 @@ const App = ({ user }) => {
                         };
                     });
 
+                    // Update dailyPicks in local storage to mark it as checked
+                    setDailyPicks(prev => ({
+                        ...prev,
+                        [gameId]: { ...prev[gameId], isResultChecked: true, resultStatus: isCorrect ? 'correct' : 'wrong' }
+                    }));
+
                     const resultMessage = isCorrect ?
                         `🎉 Correct! ${result.winner === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.name : todaysGames.find(g => g.id === gameId).awayTeam.name} won ${result.homeScore}-${result.awayScore}.` :
                         `😞 Wrong! You picked ${userPickForGame.selectedTeam === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.abbr : todaysGames.find(g => g.id === gameId).awayTeam.abbr}, but ${result.winner === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.name : todaysGames.find(g => g.id === gameId).awayTeam.name} won ${result.homeScore}-${result.awayScore}.`;
@@ -2346,7 +2403,7 @@ const App = ({ user }) => {
         } finally {
             setResultLoadingStates(prev => ({ ...prev, [gameId]: false }));
         }
-    }, [todaysGames, dailyPicks, gameResultsHistory, today, setUserState, setTodaysGameResultsDisplay, setGameResultsHistory, addNotification, playSound]);
+    }, [todaysGames, dailyPicks, gameResultsHistory, today, setUserState, setTodaysGameResultsDisplay, setGameResultsHistory, addNotification, playSound, setDailyPicks]);
 
 
     // Auto-fetch results when games should be finished
@@ -2357,9 +2414,10 @@ const App = ({ user }) => {
             const gameAlreadyStarted = gameStartedStates[game.id];
             const gameResultDisplayed = todaysGameResultsDisplay[game.id];
             const gameLoadingResult = resultLoadingStates[game.id];
+            const userPickMade = dailyPicks[game.id] && dailyPicks[game.id].isSubmitted; // Only check results for submitted picks
 
-            if (!gameAlreadyStarted || gameResultDisplayed || gameLoadingResult) {
-                return; // Skip if not started, already has result, or already loading
+            if (!gameAlreadyStarted || gameResultDisplayed || gameLoadingResult || !userPickMade) {
+                return; // Skip if not started, already has result, already loading, or no submitted pick
             }
             
             const estimatedGameEnd = new Date(new Date(game.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours after start
@@ -2382,7 +2440,7 @@ const App = ({ user }) => {
                 }
             }
         });
-    }, [todaysGames, gameStartedStates, todaysGameResultsDisplay, resultLoadingStates, fetchAndDisplayResult]);
+    }, [todaysGames, gameStartedStates, todaysGameResultsDisplay, resultLoadingStates, fetchAndDisplayResult, dailyPicks]);
 
 
     const handleToggleTheme = useCallback(() => {
@@ -2659,6 +2717,7 @@ const App = ({ user }) => {
                     --accent-win: #22c55e;
                     --success: #10b981;
                     --error: #ef4444;
+                    --warning: #f59e0b;
                 }
 
                 .dark {
@@ -2683,6 +2742,8 @@ const App = ({ user }) => {
                     position: relative;
                     overflow: hidden;
                     transition: all var(--transition-normal);
+                    /* Priority Fix: Add proper bottom padding for indicators */
+                    padding-bottom: 3.5rem; /* Space for indicators */
                 }
 
                 .matchup-card::before {
@@ -2710,7 +2771,8 @@ const App = ({ user }) => {
 
                 .team-card {
                     /* CRITICAL: Exact dimensions for symmetry */
-                    min-height: 160px;
+                    min-height: 320px; /* Priority Fix: Increased for content */
+                    max-width: 100%; /* Priority Fix: ensure max-width is 100% */
                     width: 100%;
                     aspect-ratio: 3/4; /* Maintain consistent proportions */
                     display: flex;
@@ -2824,7 +2886,7 @@ const App = ({ user }) => {
                     50% { opacity: 0.7; }
                 }
 
-                /* MOBILE OPTIMIZATIONS */
+                /* Mobile timer and date fixes */
                 @media (max-width: 640px) {
                     .team-selection-container {
                         grid-template-columns: 1fr 50px 1fr;
@@ -2833,7 +2895,7 @@ const App = ({ user }) => {
                     }
                     
                     .team-card {
-                        min-height: 140px;
+                        min-height: 280px; /* Priority Fix: Scaled for mobile */
                         padding: var(--space-md);
                     }
                     
@@ -3047,6 +3109,12 @@ const App = ({ user }) => {
                   overflow: hidden;
                   position: relative;
                   border-radius: 1.5rem;
+                  /* Priority Fix: Add visual feedback for swipe interactions */
+                  cursor: grab;
+                }
+
+                .carousel-viewport.swiping {
+                    cursor: grabbing;
                 }
 
                 /* Track (slides horizontally) */
@@ -3054,6 +3122,12 @@ const App = ({ user }) => {
                   display: flex;
                   /* Width handled by JS based on games.length */
                   transition: transform 0.3s ease-out;
+                  /* Priority Fix: Disable transition during drag */
+                  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+
+                .carousel-track.dragging {
+                    transition: none;
                 }
 
                 /* Individual game card wrapper within track */
@@ -3080,46 +3154,80 @@ const App = ({ user }) => {
                   align-items: center;
                   justify-content: center;
                   cursor: pointer;
-                  transition: all 0.2s ease;
                   flex-shrink: 0;
                   color: var(--text-primary); /* Icon color */
+                  /* Priority Fix: Proper touch targets */
+                  min-width: 44px;
+                  min-height: 44px;
+                  /* Priority Fix: Arrow Button Polish */
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 }
 
                 .carousel-arrow:hover:not(:disabled) {
                   background: var(--accent-info);
                   color: white;
-                  transform: scale(1.1);
+                  transform: scale(1.05); /* Adjusted from 1.1 */
+                  border-color: var(--accent-info); /* Priority Fix: border-color change on hover */
+                  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-info) 25%, transparent); /* Priority Fix: Add stronger shadow */
                 }
 
                 .carousel-arrow:disabled {
-                  opacity: 0.3;
+                  opacity: 0.4;
                   cursor: not-allowed;
+                  /* Priority Fix: Disabled state background/border */
+                  background: var(--bg-tertiary);
+                  border-color: var(--bg-tertiary);
                 }
 
                 /* Indicator dots */
                 .carousel-indicators {
-                  display: flex;
-                  justify-content: center;
-                  gap: 0.5rem;
-                  margin-top: 1rem;
-                  width: 100%; /* Ensure indicators span full width below carousel */
+                  /* Priority Fix: Polished indicators */
                   position: absolute;
-                  bottom: -2.5rem; /* Adjust to sit below the carousel */
+                  bottom: 1rem; /* Position within card padding */
+                  left: 50%;
+                  transform: translateX(-50%);
+                  width: auto; /* Don't force full width */
+                  display: flex;
+                  gap: 0.75rem; /* Increased spacing */
+                  align-items: center;
                 }
 
                 .indicator {
-                  width: 8px;
-                  height: 8px;
+                  /* Priority Fix: Polished indicators */
+                  width: 10px; /* Slightly larger */
+                  height: 10px;
                   border-radius: 50%;
                   border: none;
-                  background: var(--bg-tertiary);
+                  background: transparent; /* Changed to transparent, actual dot is ::before */
                   cursor: pointer;
-                  transition: all 0.2s ease;
+                  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                  /* Priority Fix: Ensure proper touch targets */
+                  min-width: 24px; /* Larger touch area */
+                  min-height: 24px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
                 }
 
-                .indicator.active {
+                .indicator::before {
+                    content: '';
+                    width: 10px; /* Actual dot size */
+                    height: 10px;
+                    border-radius: 50%;
+                    background: var(--bg-tertiary); /* Dot color from CSS variable */
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+
+                .indicator.active::before {
                   background: var(--accent-info);
-                  transform: scale(1.5);
+                  transform: scale(1.2); /* Less aggressive scaling */
+                  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-info) 30%, transparent);
+                }
+
+                .indicator:hover:not(.active)::before {
+                    background: color-mix(in srgb, var(--accent-info) 50%, var(--bg-tertiary));
+                    transform: scale(1.1);
                 }
 
                 /* Mobile optimizations */
@@ -3134,35 +3242,163 @@ const App = ({ user }) => {
                   }
 
                   .carousel-indicators {
-                    bottom: -2rem; /* Smaller adjustment for mobile */
+                    bottom: 1rem; /* Consistent on mobile too */
                   }
                 }
                 .game-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 1rem;
+                    /* Priority Fix: Reduce spacing */
+                    margin-bottom: 0.5rem;
+                    /* Priority Fix: Add gap between header items */
+                    gap: 0.5rem;
                     padding: 0 1rem; /* Add horizontal padding */
                 }
 
+                @media (max-width: 640px) {
+                    .game-header {
+                        padding: 0.75rem; /* Priority Fix: Scaled for mobile */
+                        flex-direction: column; /* Priority Fix: Stack on mobile */
+                        text-align: center;
+                        gap: 0.25rem;
+                    }
+                }
+
                 .sport-badge {
+                    /* Priority Fix: Standardize font sizes and weights */
+                    font-size: 0.75rem; /* 12px */
+                    font-weight: 600;
+                    letter-spacing: 0.025em;
                     background-color: var(--accent-info);
                     color: white;
-                    font-size: 0.75rem;
                     padding: 0.25rem 0.5rem;
                     border-radius: 9999px; /* Full pill shape */
-                    font-weight: 600;
                 }
 
                 .venue {
-                    font-size: 0.875rem;
+                    /* Priority Fix: Standardize font sizes and weights */
+                    font-size: 0.875rem; /* 14px */
+                    font-weight: 400;
                     color: var(--text-secondary);
                 }
 
-                .game-time {
-                    font-size: 0.875rem;
+                .timer-text { /* This is the specific game time display component's text */
+                    /* Priority Fix: Standardize font sizes and weights */
+                    font-size: 0.875rem; /* 14px */
+                    margin-bottom: 0.5rem;
                     color: var(--text-secondary);
                 }
+
+                .game-time-large { /* This is the new class for the "Starts in" countdown */
+                    /* Priority Fix: Standardize font sizes and weights */
+                    font-size: 1.125rem; /* 18px */
+                    font-weight: 600;
+                    color: var(--text-primary);
+                }
+
+                /* Priority Fix: Pick Status Styling */
+                .pick-status { /* This is the div in GameResultDisplay, not GameStatusBadge */
+                    background: linear-gradient(135deg, 
+                        color-mix(in srgb, var(--success) 10%, var(--bg-tertiary)),
+                        var(--bg-tertiary)
+                    );
+                    border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
+                    font-weight: 500;
+                }
+
+                .pick-status.game-started {
+                    background: linear-gradient(135deg, 
+                        color-mix(in srgb, var(--warning) 10%, var(--bg-tertiary)),
+                        var(--bg-tertiary)
+                    );
+                    border-color: color-mix(in srgb, var(--warning) 20%, transparent);
+                }
+
+                /* Priority Fix: Submit Button Positioning & Styling */
+                .submit-section {
+                    border-top: 1px solid var(--bg-tertiary);
+                    padding: 1.5rem 1rem 1rem;
+                    background: linear-gradient(to bottom, transparent, var(--bg-secondary));
+                }
+
+                .submit-content {
+                    text-align: center;
+                    max-width: 280px;
+                    margin: 0 auto;
+                }
+
+                .submit-button {
+                    background: linear-gradient(135deg, var(--success), color-mix(in srgb, var(--success) 80%, #000));
+                    color: white;
+                    font-weight: 600;
+                    padding: 0.875rem 1.5rem;
+                    border-radius: 0.75rem;
+                    border: none;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    width: 100%;
+                    justify-content: center;
+                    box-shadow: 0 4px 12px color-mix(in srgb, var(--success) 25%, transparent);
+                }
+
+                .submit-button:hover {
+                    transform: translateY(-1px);
+                    box-shadow: 0 6px 16px color-mix(in srgb, var(--success) 30%, transparent);
+                }
+
+                .submit-helper-text {
+                    font-size: 0.75rem;
+                    color: var(--text-secondary);
+                    margin-top: 0.5rem;
+                    line-height: 1.4;
+                }
+
+                /* Priority Fix: Game Status Indicators Styling */
+                .status-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.25rem;
+                    padding: 0.5rem 0.75rem;
+                    border-radius: 0.5rem;
+                    font-size: 0.875rem;
+                    font-weight: 500;
+                    margin-top: 0.75rem;
+                }
+
+                .status-badge.available {
+                    background: color-mix(in srgb, var(--accent-info) 10%, var(--bg-tertiary));
+                    color: var(--accent-info);
+                    border: 1px solid color-mix(in srgb, var(--accent-info) 20%, transparent);
+                }
+
+                .status-badge.picked {
+                    background: color-mix(in srgb, var(--success) 10%, var(--bg-tertiary));
+                    color: var(--success);
+                    border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
+                }
+
+                .status-badge.locked {
+                    background: color-mix(in srgb, var(--warning) 10%, var(--bg-tertiary));
+                    color: var(--warning);
+                    border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+                }
+
+                .status-badge.correct {
+                    background: color-mix(in srgb, var(--success) 15%, var(--bg-tertiary));
+                    color: var(--success);
+                    border: 1px solid var(--success);
+                }
+
+                .status-badge.incorrect {
+                    background: color-mix(in srgb, var(--error) 15%, var(--bg-tertiary));
+                    color: var(--error);
+                    border: 1px solid var(--error);
+                }
+
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3178,7 +3414,7 @@ const App = ({ user }) => {
 
                 {/* Multi-game carousel section */}
                 {todaysGames.length > 0 ? (
-                    <div className="matchup-card mb-6 relative pb-10"> {/* Added relative and pb for indicators */}
+                    <div className="matchup-card mb-6 relative"> {/* Removed pb-10, now handled by css padding-bottom on matchup-card */}
                         <GameCarousel
                             games={todaysGames}
                             currentIndex={currentGameIndex}
@@ -3197,16 +3433,21 @@ const App = ({ user }) => {
                         
                         {/* Submit button (show when picks made and games haven't started for the current game) */}
                         {Object.keys(dailyPicks).length > 0 && !gameStartedStates[todaysGames[currentGameIndex]?.id] && (
-                            <div className="text-center mt-4 p-4 border-t border-bg-tertiary">
-                                <button
-                                    onClick={submitAllPicks}
-                                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105"
-                                >
-                                    🚀 Submit {Object.keys(dailyPicks).length} Pick{Object.keys(dailyPicks).length > 1 ? 's' : ''}
-                                </button>
-                                <p className="text-sm text-text-secondary mt-2">
-                                    You can still modify picks until games start
-                                </p>
+                            <div className="submit-section">
+                                <div className="submit-content">
+                                    <button
+                                        onClick={submitAllPicks}
+                                        className="submit-button"
+                                    >
+                                        <span className="submit-icon">🚀</span>
+                                        <span className="submit-text">
+                                            Submit {Object.keys(dailyPicks).length} Pick{Object.keys(dailyPicks).length > 1 ? 's' : ''}
+                                        </span>
+                                    </button>
+                                    <p className="submit-helper-text">
+                                        You can modify picks until games start
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>
