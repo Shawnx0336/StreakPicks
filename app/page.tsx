@@ -875,40 +875,33 @@ const useFirebaseLeaderboard = (userState, userId) => {
     }, [userId]);
 
     const updateLeaderboard = useCallback(async () => {
-        // Don't update if user data isn't ready
-        if (!userState.displayName || userState.displayName === 'AnonymousPicker') {
-            return;
-        }
+    // STRICT: Don't update if user data isn't ready OR if it's a test user
+    if (!userState.displayName || 
+        userState.displayName === 'AnonymousPicker' ||
+        userId.includes('test_') || 
+        userId.includes('anonymous_') || 
+        userId.includes('fallback_') ||
+        userId === 'anonymous' ||
+        userId.length < 10) {
+        console.log('🚫 Skipping leaderboard update for test/anonymous user:', userId);
+        return;
+    }
 
-        const currentUserEntry = {
-            id: simpleHash(userId).toString(),
-            whopUserId: userId, // Store actual Whop user ID for reference
-            displayName: userState.displayName,
-            currentStreak: userState.currentStreak,
-            bestStreak: userState.bestStreak,
-            totalPicks: userState.totalPicks,
-            correctPicks: userState.correctPicks,
-            accuracy: userState.totalPicks > 0 ? Math.round((userState.correctPicks / userState.totalPicks) * 100) : 0,
-            weeklyWins: userState.weeklyStats?.correct || 0,
-            lastActive: new Date().toISOString(),
-            lastUpdated: new Date().toISOString()
-        };
+    const currentUserEntry = {
+        id: simpleHash(userId).toString(),
+        whopUserId: userId, // This will be validated by Firebase rules
+        displayName: userState.displayName,
+        // ... rest of your data
+    };
 
-        try {
-            // Update user's data in Firebase
-            const userRef = ref(database, `leaderboard/${currentUserEntry.id}`);
-            await set(userRef, currentUserEntry);
-            
-            console.log(`Updated Firebase leaderboard for ${currentUserEntry.displayName}:`, {
-                streak: currentUserEntry.currentStreak,
-                totalPicks: currentUserEntry.totalPicks,
-                accuracy: currentUserEntry.accuracy
-            });
-
-        } catch (error) {
-            console.error('Error updating Firebase leaderboard:', error);
-        }
-    }, [userState, userId]);
+    try {
+        const userRef = ref(database, `leaderboard/${currentUserEntry.id}`);
+        await set(userRef, currentUserEntry);
+        console.log(`✅ Updated Firebase leaderboard for REAL user: ${currentUserEntry.displayName}`);
+    } catch (error) {
+        console.error('❌ Firebase rejected leaderboard update (likely test user):', error);
+    }
+}, [userState, userId]);
 
     const refreshLeaderboard = useCallback(async () => {
         // Firebase automatically refreshes via real-time listener
