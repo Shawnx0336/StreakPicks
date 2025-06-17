@@ -8,7 +8,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, onValue, push, serverTimestamp, off } from 'firebase/database';
 
-// Firebase configuration (USE THIS EXACT CONFIG)
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDV6qrKInWWQ-w81p6TiZqwEw3kYEBTpR8",
   authDomain: "streakpicks-2a21a.firebaseapp.com",
@@ -42,6 +42,7 @@ const useWhop = () => {
 
         const checkAuthStatus = async () => {
             try {
+                // Check if user is authenticated by looking for auth cookie
                 const response = await fetch('/api/auth/check', {
                     method: 'GET',
                     credentials: 'include',
@@ -57,11 +58,13 @@ const useWhop = () => {
                     setHasAccess(true);
                     setError(null);
                 } else if (response.status === 401) {
+                    // User not authenticated
                     setUser(null);
                     setIsAuthenticated(false);
                     setHasAccess(false);
                     setError(null);
                 } else {
+                    // Other error
                     throw new Error(`Authentication check failed: ${response.status}`);
                 }
             } catch (err) {
@@ -71,13 +74,14 @@ const useWhop = () => {
                 setIsAuthenticated(false);
                 setHasAccess(false);
             } finally {
-                setLoading(false);
+                setIsLoading(false); // Set loading to false once check is complete
             }
         };
 
         checkAuthStatus();
     }, [isClient]);
 
+    // Show loading until client-side hydration is complete
     if (!isClient) {
         return { user: null, isAuthenticated: false, isLoading: true, hasAccess: false, error: null };
     }
@@ -104,7 +108,7 @@ const useWhop = () => {
  * @property {number} bestStreak - All-time best consecutive correct picks.
  * @property {number} totalPicks - Total picks made.
  * @property {number} correctPicks - Total correct picks.
- * @property {Object | null} todaysPick - Details of today's pick: { matchupId, selectedTeam, timestamp, date }.
+ * @property {Object | null} todaysPick - Details of today's pick: { matchupId, selectedTeam, timestamp, date }."
  * @property {string | null} lastPickDate - `toDateString()` of the last date a pick was made.
  * @property {Theme} theme - Current UI theme ('dark' or 'light').
  * @property {boolean} soundEnabled - Is sound enabled?
@@ -115,7 +119,6 @@ const useWhop = () => {
 
 /**
  * @typedef {Object} Team
- *
  * @property {string} name - Full team name.
  * @property {string} abbr - Team abbreviation.
  * @property {string} logo - Emoji logo for the sport.
@@ -130,7 +133,7 @@ const useWhop = () => {
  * @property {string} sport - Sport type (e.e., 'NBA', 'NFL', 'MLB', 'NHL', 'Soccer', 'NCAAB').
  * @property {string} venue - Venue name.
  * @property {string} startTime - Matchup start time (ISO string).
- * @property {string} status - Current status of the matchup (e.e., 'upcoming').
+ * @property {string} status - Current status of the matchup (e.g., 'upcoming').
  */
 
 /**
@@ -172,7 +175,7 @@ const useWhop = () => {
  */
 const simpleHash = (str) => {
     let hash = 0;
-    if (str === null || str === undefined) {
+    if (str === null || str === undefined) { // Handle null or undefined string input
         str = '';
     }
     for (let i = 0; i < str.length; i++) {
@@ -181,6 +184,24 @@ const simpleHash = (str) => {
         hash |= 0; // Convert to 32bit integer
     }
     return Math.abs(hash);
+};
+
+/**
+ * Generates an anonymous but consistent display name based on userId.
+ * @param {string} userId - The user's unique ID.
+ * @returns {string} Generated display name.
+ */
+const generateDisplayName = (userId) => {
+    const adjectives = ['Fire', 'Ice', 'Lightning', 'Storm', 'Steel', 'Shadow', 'Blazing', 'Mighty', 'Swift', 'Golden', 'Mystic', 'Crimson', 'Azure', 'Jade', 'Silver', 'Bronze', 'Diamond', 'Emerald', 'Vapor', 'Echo'];
+    const nouns = ['Picker', 'Prophet', 'Analyst', 'Streak', 'Eagle', 'Tiger', 'Champion', 'Master', 'Wizard', 'Legend', 'Striker', 'Scout', 'Oracle', 'Hunter', 'Guardian', 'Titan', 'Specter', 'Vanguard', 'Pioneer', 'Maverick'];
+
+    // Use userId hash to ensure consistent name
+    const hashVal = simpleHash(userId);
+    const adjIndex = hashVal % adjectives.length;
+    const nounIndex = Math.floor(hashVal / adjectives.length) % nouns.length;
+    const number = (Math.floor(hashVal / (adjectives.length * nouns.length)) % 999) + 1; // 1 to 999
+
+    return `${adjectives[adjIndex]}${nouns[nounIndex]}${number}`;
 };
 
 /**
@@ -205,6 +226,28 @@ const getDisplayName = (user) => {
     // Always use Whop account information
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
+
+/**
+ * Checks if a Date object is valid.
+ * @param {Date} date - The Date object to check.
+ * @returns {boolean} True if the date is valid, false otherwise.
+ */
+const isValidDate = (date) => {
+    return date instanceof Date && !isNaN(date.getTime());
+};
+
+/**
+ * Safely parses a date input into a Date object, returning null if invalid.
+ * @param {*} dateInput - The input to parse (e.g., string, number, Date object).
+ * @returns {Date | null} A valid Date object or null.
+ */
+const safeParseDate = (dateInput) => {
+    if (!dateInput) return null;
+    
+    const date = new Date(dateInput);
+    return isValidDate(date) ? date : null;
+};
+
 
 // MLB Team Colors
 const getMLBTeamColors = (abbr) => {
@@ -262,7 +305,7 @@ const getMLBTeamColors = (abbr) => {
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
     
-    // Use local date for API query
+    // ✅ CRITICAL FIX: Use local date, not UTC for API query
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -326,8 +369,9 @@ const getTodaysMLBGame = async () => {
         };
         
     } catch (error) {
+        // Log the full error object for better debugging
         console.error('❌ MLB API FAILED:', error); 
-        throw error;
+        throw error; // DON'T CATCH - LET IT FAIL
     }
 };
 
@@ -462,6 +506,21 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 }
                 return updatedParsedItem;
             }
+            // For gameResult, if it's from a previous day, invalidate it.
+            if (keyPrefix === 'todaysGameResult' && parsedItem) {
+                const gameResultDate = new Date(parsedItem.completedAt).toISOString().split('T')[0];
+                if (gameResultDate !== today) { // 'today' is defined in App component, so passing it here might be an issue if this is truly global.
+                                              // For now, let's assume `today` is passed correctly or handle it more generically.
+                                              // Given useLocalStorage is a global helper, let's make it robust to dates.
+                    const now = new Date();
+                    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                    if (gameResultDate !== currentDate) {
+                        console.log('🗑️ Invalidating old game result from cache.');
+                        return initialValue; // Invalidate the old result
+                    }
+                }
+            }
+
 
             return parsedItem;
         } catch (error) {
@@ -1477,7 +1536,7 @@ const ErrorDisplay = ({ message }) => (
 /**
  * Enhanced GameTimeDisplay with detailed mobile debugging
  */
-const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId, setGameStarted }) => {
+const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
     // Removed debugInfo state as platform-specific info is no longer desired in logs
@@ -1532,7 +1591,6 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId, setGameSta
             const diff = gameTime - now;
 
             if (diff <= 0) {
-                setGameStarted(true); // Now correctly uses the prop
                 setTimeLeft('Game Started');
                 return;
             }
@@ -1553,7 +1611,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId, setGameSta
             isActive = false;
             clearInterval(intervalId);
         };
-    }, [gameTime, setTimeLeft, setGameStarted]); // Added setGameStarted to dependencies
+    }, [gameTime, setTimeLeft]);
 
     if (!gameTime) {
         return (
@@ -1584,6 +1642,48 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId, setGameSta
 };
 
 
+// Step 6: Create GameResultDisplay Component
+const GameResultDisplay = ({ result, todaysMatchup, userPick }) => {
+    if (!result || !todaysMatchup) return null;
+    
+    const winnerTeam = result.winner === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam;
+    // Ensure userPick and selectedTeam exist before accessing
+    const userPickedTeam = userPick?.selectedTeam ? (userPick.selectedTeam === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam) : null;
+    const userWasCorrect = userPick?.selectedTeam === result.winner;
+    
+    return (
+        <div className="mt-4 bg-bg-tertiary rounded-xl p-4 border-2 border-bg-tertiary">
+            <div className="text-center mb-3">
+                <h4 className="font-bold text-lg text-text-primary mb-2">Final Result</h4>
+                <div className="text-2xl font-bold">
+                    <span className={result.winner === 'home' ? 'text-accent-win' : 'text-text-primary'}>
+                        {todaysMatchup.homeTeam.abbr} {result.homeScore}
+                    </span>
+                    <span className="text-text-secondary mx-2">-</span>
+                    <span className={result.winner === 'away' ? 'text-accent-win' : 'text-text-primary'}>
+                        {result.awayScore} {todaysMatchup.awayTeam.abbr}
+                    </span>
+                </div>
+                <p className="text-sm text-text-secondary mt-1">
+                    Winner: {winnerTeam.name}
+                </p>
+            </div>
+            
+            {userPick && (
+                <div className={`text-center p-3 rounded-lg ${userWasCorrect ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                    <p className={`font-semibold ${userWasCorrect ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                        {userWasCorrect ? '✅ You were CORRECT!' : '❌ You were wrong'}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                        You picked: {userPickedTeam?.name || 'N/A'}
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 // ========== APP COMPONENT WITH FIXES ==========
 /**
  * Modified App component with comprehensive debugging
@@ -1592,44 +1692,23 @@ const App = ({ user }) => {
     const userId = user?.id || 'anonymous';
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     
+    // Step 1: Add New State Variables
+    const [gameResult, setGameResult] = useState(null);
+    const [resultLoading, setResultLoading] = useState(false);
+
+    // Step 2: Add Result Caching to localStorage
+    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId);
+
+
     // Share analytics state
-    // Converted to use useState with direct localStorage read/write for simplification.
-    const [shareStats, setShareStats] = useState(() => {
-        if (typeof window === 'undefined') return { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
-        try {
-            const stored = window.localStorage.getItem(`shareStats_${userId}`);
-            return stored ? JSON.parse(stored) : { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
-        } catch (error) {
-            console.error('Error reading shareStats from localStorage:', error);
-            return { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
-        }
-    });
-
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(`shareStats_${userId}`, JSON.stringify(shareStats));
-        }
-    }, [shareStats, userId]);
-
+    const [shareStats, setShareStats] = useLocalStorage('shareStats', {
+        totalShares: 0,
+        sharesByType: {},
+        sharesByPlatform: {},
+        lastShared: null
+    }, userId); 
     // Game results history storage
-    // Converted to use useState with direct localStorage read/write for simplification.
-    const [gameResults, setGameResults] = useState(() => {
-        if (typeof window === 'undefined') return [];
-        try {
-            const stored = window.localStorage.getItem(`gameResults_${userId}`);
-            return stored ? JSON.parse(stored) : [];
-        } catch (error) {
-            console.error('Error reading gameResults from localStorage:', error);
-            return [];
-        }
-    });
-
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(`gameResults_${userId}`, JSON.stringify(gameResults));
-        }
-    }, [gameResults, userId]);
-
+    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -1754,11 +1833,128 @@ const App = ({ user }) => {
         const interval = setInterval(updateTimer, 1000);
         
         return () => clearInterval(interval);
-    }, [todaysMatchup?.startTime, setTimeLeft, setGameStarted]);
+    }, [todaysMatchup?.startTime]);
+
+
+    // Step 4: Create Result Fetching Function
+    const fetchAndDisplayResult = useCallback(async () => {
+        if (!todaysMatchup || resultLoading) return;
+        
+        setResultLoading(true);
+        try {
+            const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport);
+            if (result) {
+                setGameResult(result);
+                setTodaysGameResult(result); // Cache it
+                // Also, if a pick was made, update streak based on this result
+                if (hasPickedToday && userState.todaysPick && result.completedAt) {
+                    const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
+                    const actualWinner = result.winner; // 'home', 'away', or 'tie'
+                    let isCorrect = userPickedTeam === actualWinner;
+
+                    // Treat ties as correct to keep streak going, unless specific rule.
+                    // For baseball, ties are extremely rare and usually resolved in extra innings.
+                    // If the game is final and it's a tie, let's consider it correct for simplicity.
+                    if (actualWinner === 'tie') {
+                        isCorrect = true;
+                    }
+
+                    setIsStreakIncreasing(isCorrect); // Set for animation
+
+                    setUserState(prev => {
+                        const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
+                        const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
+
+                        return {
+                            ...prev,
+                            correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
+                            currentStreak: newCurrentStreak,
+                            bestStreak: newBestStreak,
+                            weeklyStats: {
+                                ...prev.weeklyStats,
+                                correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
+                                picks: prev.weeklyStats.picks + 1
+                            }
+                        };
+                    });
+
+                    setGameResults(prev => [
+                        ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
+                        {
+                            gameId: userState.todaysPick.matchupId,
+                            userPick: userState.todaysPick.selectedTeam,
+                            actualWinner: result.winner,
+                            isCorrect: isCorrect,
+                            finalScore: `${result.homeScore}-${result.awayScore}`,
+                            checkedAt: new Date().toISOString(),
+                            gameDate: todaysMatchup.startTime
+                        }
+                    ]);
+
+                    const resultMessage = isCorrect ?
+                        `🎉 Correct! ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.` :
+                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.abbr : todaysMatchup.awayTeam.abbr}, but ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.`;
+
+                    addNotification({
+                        type: isCorrect ? 'success' : 'error',
+                        message: resultMessage
+                    });
+                    playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+
+                    setTimeout(() => setIsStreakIncreasing(false), 1500);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching game result for display:', error);
+            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
+        } finally {
+            setResultLoading(false);
+        }
+    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, setUserState, setGameResults, addNotification, playSound]);
+
+
+    // Step 3: Create Auto Result Fetching Logic
+    useEffect(() => {
+        // Only fetch if we have a matchup, game has started, and we don't already have the result
+        if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
+        
+        const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
+        const now = new Date();
+        
+        if (now > estimatedGameEnd) {
+            // Game should be over, fetch result immediately
+            fetchAndDisplayResult();
+        } else {
+            // Set timer to fetch when game should be over, plus a 30min buffer
+            const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
+            if (timeUntilCheck > 0) { // Only set timeout if timeUntilCheck is positive
+                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
+                const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
+                return () => clearTimeout(timerId); // Cleanup on unmount or re-run
+            }
+        }
+    }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
+
+
+    // Step 5: Load Cached Result on Page Load
+    useEffect(() => {
+        if (todaysGameResult && !gameResult) {
+            // Ensure the cached result is for today's game
+            const cachedResultDate = new Date(todaysGameResult.completedAt).toISOString().split('T')[0];
+            if (cachedResultDate === today && todaysMatchup && todaysGameResult.gameId === todaysMatchup.id) {
+                setGameResult(todaysGameResult);
+            } else {
+                // If cached result is old or for a different game, clear it
+                setTodaysGameResult(null);
+            }
+        }
+    }, [todaysGameResult, gameResult, today, todaysMatchup, setTodaysGameResult]);
 
 
     /**
      * Checks the actual result of a user's pick (REPLACES simulateResult)
+     * This is now primarily for *initial* pick verification/streak update,
+     * the auto-fetch will handle the display result.
      * @param {Object} pick - The user's pick object
      * @param {Matchup} matchup - The matchup details
      * @param {number} attempt - Current retry attempt count
@@ -1794,9 +1990,9 @@ const App = ({ user }) => {
             try {
                 console.log(`Checking result for game ${pick.matchupId} (Attempt ${attempt})...`);
 
-                let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
+                let gameResultFromFetch = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
 
-                if (!gameResult) {
+                if (!gameResultFromFetch) {
                     if (attempt < MAX_ATTEMPTS) {
                         console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
                         // Schedule next attempt recursively
@@ -1811,10 +2007,13 @@ const App = ({ user }) => {
                         return;
                     }
                 }
+                // If result is fetched successfully, set it globally and cache it
+                setGameResult(gameResultFromFetch);
+                setTodaysGameResult(gameResultFromFetch);
 
                 // Determine if user's pick was correct
                 const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
-                const actualWinner = gameResult.winner; // 'home', 'away', or 'tie'
+                const actualWinner = gameResultFromFetch.winner; // 'home', 'away', or 'tie'
 
                 let isCorrect = false;
                 let resultMessage = '';
@@ -1822,16 +2021,16 @@ const App = ({ user }) => {
                 if (actualWinner === 'tie') {
                     // Handle ties - could be considered correct, or push (no win/loss)
                     isCorrect = true; // For now, treat ties as wins to avoid frustrating users
-                    resultMessage = `🤝 Tie Game! ${gameResult.homeTeam.abbreviation} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}. Streak continues!`;
+                    resultMessage = `🤝 Tie Game! ${gameResultFromFetch.homeTeam.abbreviation} ${gameResultFromFetch.homeScore} - ${gameResultFromFetch.awayTeam.abbreviation} ${gameResultFromFetch.awayScore}. Streak continues!`;
                 } else if (userPickedTeam === actualWinner) {
                     isCorrect = true;
-                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
-                    resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak: ${userState.currentStreak + 1}!`;
+                    const winningTeam = actualWinner === 'home' ? gameResultFromFetch.homeTeam : gameResultFromFetch.awayTeam;
+                    resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}. Streak: ${userState.currentStreak + 1}!`;
                 } else {
                     isCorrect = false;
-                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
+                    const winningTeam = actualWinner === 'home' ? gameResultFromFetch.homeTeam : gameResultFromFetch.awayTeam;
                     const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
-                    resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak reset.`;
+                    resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}. Streak reset.`;
                 }
 
                 setIsStreakIncreasing(isCorrect); // Set for animation
@@ -1860,9 +2059,9 @@ const App = ({ user }) => {
                     {
                         gameId: pick.matchupId,
                         userPick: pick.selectedTeam,
-                        actualWinner: gameResult.winner,
+                        actualWinner: gameResultFromFetch.winner,
                         isCorrect: isCorrect,
-                        finalScore: `${gameResult.homeScore}-${gameResult.awayScore}`,
+                        finalScore: `${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}`,
                         checkedAt: new Date().toISOString(),
                         gameDate: matchup.startTime // startTime is already ISO string
                     }
@@ -1878,7 +2077,7 @@ const App = ({ user }) => {
 
                 // Log for debugging
                 console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
-                console.log(`Game: ${gameResult.homeTeam.name} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}`); // Fixed: Display away team abbr
+                console.log(`Game: ${gameResultFromFetch.homeTeam.name} ${gameResultFromFetch.homeScore} - ${gameResultFromFetch.awayTeam.abbreviation} ${gameResultFromFetch.awayScore}`); // Fixed: Display away team abbr
 
             } catch (error) {
                 console.error('Error processing game result:', error);
@@ -1893,7 +2092,7 @@ const App = ({ user }) => {
             }
         }, delayForThisAttempt);
 
-    }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats]);
+    }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats, setGameResult, setTodaysGameResult]);
 
 
     /**
@@ -1940,6 +2139,7 @@ const App = ({ user }) => {
         playSound('pick_select');
 
         // Always check real result since we only load real MLB games now
+        // This initial call *sets the timer* to check later, it doesn't fetch immediately.
         checkRealResult(newPick, todaysMatchup);
 
     }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult]);
@@ -2296,9 +2496,6 @@ const App = ({ user }) => {
                     
                     /* Accessibility */
                     outline: none;
-
-                    /* Subtle inner shadow for depth */
-                    box-shadow: var(--shadow-md), inset 0 1px 3px 0 rgba(0,0,0,0.05);
                 }
 
                 .team-card:focus-visible {
@@ -2317,13 +2514,11 @@ const App = ({ user }) => {
 
                 .team-card.selected {
                     border-color: var(--team-primary);
-                    border-width: 3px; /* Thicker border on selection */
                     background: linear-gradient(135deg, 
-                        var(--team-primary)20, /* More prominent primary color in background */
+                        var(--team-primary)10, 
                         var(--bg-secondary)
                     );
                     transform: scale(1.02);
-                    box-shadow: var(--shadow-lg), 0 0 15px var(--team-primary)60; /* Stronger glow when selected */
                 }
 
                 .team-card.disabled {
@@ -2411,6 +2606,194 @@ const App = ({ user }) => {
                     }
                 }
 
+                /* LOADING STATES */
+                .loading-shimmer {
+                    background: linear-gradient(90deg, 
+                        transparent, 
+                        color-mix(in srgb, var(--bg-tertiary) 50%, transparent), 
+                        transparent
+                    );
+                    background-size: 200% 100%;
+                    animation: shimmer 1.5s infinite;
+                }
+
+                @keyframes shimmer {
+                    0% { background-position: -200% 0; }
+                    100% { background-position: 200% 0; }
+                }
+
+                /* General animations */
+                @keyframes fadeInUp {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                @keyframes slideInRight {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                .animate-fadeInUp { animation: fadeInUp 0.5s ease-out forwards; }
+                .animate-slideInRight { animation: slideInRight 0.5s ease-out forwards; }
+
+                /* Leaderboard Styles */
+                .leaderboard-modal {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.9);
+                backdrop-filter: blur(8px);
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                }
+
+                .leaderboard-content {
+                background: var(--bg-secondary);
+                border-radius: 24px;
+                max-width: 500px;
+                width: 100%;
+                max-height: 90vh; /* Adjusted for better fit */
+                overflow-y: auto;
+                border: 2px solid var(--bg-tertiary);
+                box-shadow: 0 10px 40px rgba(0,0,0,0.5); /* Stronger shadow */
+                }
+
+                .leaderboard-tabs {
+                display: flex;
+                border-bottom: 2px solid var(--bg-tertiary);
+                }
+
+                .leaderboard-tab {
+                flex: 1;
+                padding: 16px;
+                text-align: center;
+                background: transparent;
+                border: none;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                color: var(--text-secondary); /* Default tab text color */
+                }
+
+                .leaderboard-tab.active {
+                background: var(--accent-info);
+                color: white;
+                }
+
+                .leaderboard-entry {
+                display: flex;
+                align-items: center;
+                padding: 12px 16px;
+                border-bottom: 1px solid var(--bg-tertiary);
+                transition: background 0.2s ease;
+                }
+
+                .leaderboard-entry:last-child {
+                    border-bottom: none;
+                }
+
+                .leaderboard-entry:hover {
+                background: var(--bg-tertiary);
+                }
+
+                .leaderboard-entry.current-user {
+                background: var(--accent-info)20; /* Lighter background */
+                border-left: 4px solid var(--accent-info);
+                }
+
+                /* Rank Badge Styles */
+                .rank-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center; /* Center content horizontally */
+                padding: 8px 12px;
+                border-radius: 20px;
+                font-weight: bold;
+                font-size: 0.875rem;
+                color: var(--text-primary); /* Default color for non-special ranks */
+                min-width: 90px; /* Ensure consistent width */
+                }
+
+                .rank-badge.top-10 {
+                background: linear-gradient(135deg, #FFD700, #FFA500); /* Gold */
+                color: #1a1a1a; /* Dark text on gold */
+                animation: pulse-gold 2s infinite;
+                }
+
+                .rank-badge.top-50 {
+                background: linear-gradient(135deg, #C0C0C0, #A0A0A0); /* Silver */
+                color: #1a1a1a;
+                }
+
+                .rank-badge.top-100 {
+                background: linear-gradient(135deg, #CD7F32, #8B4513); /* Bronze */
+                color: #fff;
+                }
+                .rank-badge.standard {
+                    background: var(--bg-tertiary);
+                    color: var(--text-primary);
+                }
+
+                /* Animated Streak Styles */
+                .streak-display-container {
+                text-align: center;
+                }
+
+                .streak-number {
+                font-size: 4rem;
+                font-weight: 800;
+                line-height: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                transition: all 0.5s ease;
+                color: var(--text-primary); /* Default color */
+                }
+
+                .streak-number.celebrating {
+                animation: celebrate 1s ease-in-out;
+                color: var(--accent-win);
+                }
+
+                .streak-flame {
+                animation: flicker 1.5s infinite;
+                }
+
+                @keyframes celebrate {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.1); }
+                }
+
+                @keyframes flicker {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+                }
+
+                @keyframes pulse-gold {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
+                70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
+                }
+
+                /* Mobile timer and date fixes */
+                @media (max-width: 640px) {
+                    .team-selection-container {
+                        grid-template-columns: 1fr 50px 1fr;
+                        gap: var(--space-md);
+                        padding: var(--space-md);
+                    }
+                    
+                    .team-card {
+                        min-height: 140px;
+                        padding: var(--space-md);
+                    }
+                    
+                    .vs-divider {
+                        width: 50px;
+                        height: 50px;
+                        font-size: 1rem;
+                    }
+                }
+
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -2434,7 +2817,7 @@ const App = ({ user }) => {
                         <span className="text-xs text-text-secondary">
                             📡 Live
                         </span>
-                        <span className="text-xs text-text-secondary">{todaysMatchup.venue}</span>
+                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
                     </div>
 
                     {/* Team vs Team using the new team-selection-container grid */}
@@ -2465,7 +2848,6 @@ const App = ({ user }) => {
                                 startTime={todaysMatchup.startTime} 
                                 setTimeLeft={setTimeLeft}
                                 matchupId={todaysMatchup.id}
-                                setGameStarted={setGameStarted} // Pass setGameStarted as a prop
                             />
                         ) : (
                             <div className="text-red-500">⚠️ No game time available</div>
@@ -2485,8 +2867,32 @@ const App = ({ user }) => {
                                     '🔒 Game has started!'
                                 }
                             </p>
-                            <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>
-                            {/* Share Pick Button (Option B) */}
+                            
+                            {/* NEW: Game Result Display */}
+                            {gameResult ? (
+                                <GameResultDisplay 
+                                    result={gameResult} 
+                                    todaysMatchup={todaysMatchup} 
+                                    userPick={userState.todaysPick} 
+                                />
+                            ) : gameStarted && (
+                                <div className="mt-3">
+                                    {resultLoading ? (
+                                        <p className="text-sm text-text-secondary">🔍 Checking game result...</p>
+                                    ) : (
+                                        <button
+                                            onClick={fetchAndDisplayResult}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                                        >
+                                            🔍 Check Game Result
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            
+                            {!gameResult && <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>}
+                            
+                            {/* Existing share button code stays exactly the same */}
                             {hasPickedToday && userState.currentStreak > 0 && (
                                 <div className="mt-4 text-center">
                                     <button
@@ -2644,7 +3050,7 @@ export default function Page() {
             try {
                 console.log('Checking for Whop user...');
                 
-                // Use window.location.origin to build complete URL
+                // FIX: Use window.location.origin to build complete URL
                 const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
                 
                 // First, try to get real Whop user from headers
