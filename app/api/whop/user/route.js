@@ -54,39 +54,3 @@ export async function GET(request) {
         return Response.json({ error: 'Failed to fetch user data' }, { status: 500 });
     }
 }
-
-// Alternative method if headers approach doesn't work
-export async function POST(request) {
-    try {
-        const body = await request.json();
-        const { userId, companyId } = body;
-        
-        if (!userId) {
-            return Response.json({ error: 'User ID required' }, { status: 400 });
-        }
-
-        const userWhopApi = WhopApi({
-            appApiKey: process.env.WHOP_API_KEY ?? "",
-            onBehalfOfUserId: userId,
-            companyId: companyId || undefined,
-        });
-
-        const userData = await userWhopApi.users.getCurrentUser();
-        
-        return Response.json({
-            id: userData.user.id,
-            username: userData.user.username,
-            name: userData.user.name,
-            email: userData.user.email,
-            profilePicture: userData.user.profilePicture,
-            bio: userData.user.bio,
-            createdAt: userData.user.createdAt,
-            isWhopUser: true,
-            companyId: companyId
-        });
-        
-    } catch (error) {
-        console.error('❌ Whop API POST error:', error);
-        return Response.json({ error: 'Failed to fetch user data' }, { status: 500 });
-    }
-}
