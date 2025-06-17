@@ -383,13 +383,18 @@ const getMLBTeamData = (teamName) => {
  * NO FALLBACKS, NO SIMULATIONS, NO EXCEPTIONS
  */
 const getTodaysMLBGame = async () => {
-    console.log('🎯 SINGLE API CALL - STARTING');
+    console.log('🎯 US-TIME-BASED API CALL - STARTING');
     
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
+    // Always use US Eastern Time for determining "game day"
+    const usEasternTime = new Date().toLocaleString("en-US", {timeZone: "America/New_York"});
+    const usDate = new Date(usEasternTime);
+    
+    const year = usDate.getFullYear();
+    const month = String(usDate.getMonth() + 1).padStart(2, '0');
+    const day = String(usDate.getDate()).padStart(2, '0');
     const today = `${year}-${month}-${day}`;
+
+    console.log(`🇺🇸 Fetching game for US Eastern date: ${today} (universal for all users)`);
 
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
     
@@ -2223,8 +2228,16 @@ const App = ({ user }) => {
     const triggerHaptic = useHapticFeedback(); // Initialize haptic feedback hook
 
     // Use local date for comparison
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const getUSEasternDate = () => {
+    const usEasternTime = new Date().toLocaleString("en-US", {timeZone: "America/New_York"});
+    const usDate = new Date(usEasternTime);
+    const year = usDate.getFullYear();
+    const month = String(usDate.getMonth() + 1).padStart(2, '0');
+    const day = String(usDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const today = getUSEasternDate();
     const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based, which is fine for week start
 
 
@@ -2289,27 +2302,20 @@ const App = ({ user }) => {
 
     // Load today's matchup - SINGLE PATH ONLY
     useEffect(() => {
-        const loadTodaysGame = async () => {
-            console.log('🎮 LOADING GAME - SINGLE PATH');
-            setMatchupLoading(true);
-            
-            try {
-                const game = await getTodaysMLBGame();
-                setTodaysMatchup(game);
-                setIsInitialized(true);
-                console.log('✅ GAME LOADED SUCCESSFULLY:', game.homeTeam.name, 'vs', game.awayTeam.name);
-                
-            } catch (error) {
-                console.error('❌ GAME LOADING FAILED:', error.message);
-                setTodaysMatchup(null); // NULL = NO GAME, SHOW ERROR
-                setIsInitialized(true);
-            }
-            
-            setMatchupLoading(false);
-        };
-        
-        loadTodaysGame();
-    }, []); // NO DEPENDENCIES - LOAD ONCE
+    const loadTodaysGame = async () => {
+        setMatchupLoading(true);
+        try {
+            const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const game = await getTodaysMLBGame(userTimezone);
+            setTodaysMatchup(game);
+        } catch (error) {
+            console.error('Game loading failed:', error);
+            setTodaysMatchup(null);
+        }
+        setMatchupLoading(false);
+    };
+    loadTodaysGame();
+}, []);
 
 
     // Determine if user has picked today (only if todaysMatchup is available)
