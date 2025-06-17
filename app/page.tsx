@@ -8,7 +8,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, onValue, push, serverTimestamp, off } from 'firebase/database';
 
-// Firebase configuration
+// Firebase configuration - USE THIS EXACT CONFIG
 const firebaseConfig = {
   apiKey: "AIzaSyDV6qrKInWWQ-w81p6TiZqwEw3kYEBTpR8",
   authDomain: "streakpicks-2a21a.firebaseapp.com",
@@ -375,109 +375,106 @@ const getTodaysMLBGame = async () => {
     }
 };
 
+/**
+ * Helper function to get team abbreviation from team name
+ * This is needed for the new fetchMLBGameResult to map full names to abbreviations.
+ */
+function getTeamAbbreviation(teamName) {
+    const teamAbbrs = {
+        'Philadelphia Phillies': 'PHI',
+        'Miami Marlins': 'MIA',
+        'Colorado Rockies': 'COL',
+        'Washington Nationals': 'WSH',
+        'Los Angeles Angels': 'LAA',
+        'New York Yankees': 'NYY',
+        'Baltimore Orioles': 'BAL',
+        'Tampa Bay Rays': 'TB',
+        'Boston Red Sox': 'BOS',
+        'Seattle Mariners': 'SEA',
+        'Houston Astros': 'HOU',
+        'Athletics': 'OAK',
+        'San Diego Padres': 'SD',
+        'Los Angeles Dodgers': 'LAD',
+        'Atlanta Braves': 'ATL',
+        'New York Mets': 'NYM',
+        'Chicago Cubs': 'CHC',
+        'Milwaukee Brewers': 'MIL',
+        'Cincinnati Reds': 'CIN',
+        'Pittsburgh Pirates': 'PIT',
+        'St. Louis Cardinals': 'STL',
+        'Arizona Diamondbacks': 'ARI',
+        'San Francisco Giants': 'SF',
+        'Texas Rangers': 'TEX',
+        'Kansas City Royals': 'KC',
+        'Minnesota Twins': 'MIN',
+        'Chicago White Sox': 'CWS',
+        'Cleveland Guardians': 'CLE',
+        'Detroit Tigers': 'DET',
+        'Toronto Blue Jays': 'TOR'
+    };
+    
+    return teamAbbrs[teamName] || teamName.split(' ').pop().slice(0, 3).toUpperCase();
+}
+
 
 /**
- * Fetches actual MLB game result using MLB Official API
+ * FIXED: Get game results from the schedule API using the GAME'S date, not today's date
  * @param {string} gameId - MLB game ID (gamePk)
  * @param {string} sport - Sport type (should be 'MLB')
+ * @param {string} gameDate - The actual date of the game (ISO string from todaysMatchup.startTime)
  * @returns {Promise<Object|null>} Game result or null
  */
-const fetchMLBGameResult = async (gameId, sport) => {
+const fetchMLBGameResult = async (gameId, sport, gameDate) => {
     try {
-        console.log(`Fetching MLB game result for game ${gameId}`);
+        console.log(`🔍 Fetching MLB game result for game ${gameId}`);
         
-        // Use CORS proxy
+        // ✅ FIX: Use the game's actual date, not today's date
+        let searchDate;
+        if (gameDate) {
+            // Extract date from the game's startTime
+            searchDate = new Date(gameDate).toISOString().split('T')[0]; // YYYY-MM-DD format
+        } else {
+            // Fallback to today if no gameDate provided
+            searchDate = new Date().toISOString().split('T')[0];
+        }
+        
         const proxyUrl = 'https://api.allorigins.win/raw?url=';
-        const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
-        const response = await fetch(proxyUrl + encodeURIComponent(gameUrl));
+        const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${searchDate}`;
+        
+        console.log(`📡 Fetching from schedule API for date ${searchDate}: ${scheduleUrl}`);
+        
+        const response = await fetch(proxyUrl + encodeURIComponent(scheduleUrl));
         
         if (!response.ok) {
-            throw new Error(`Proxy returned ${response.status}`);
+            console.log(`❌ Schedule API returned ${response.status}`);
+            return null;
         }
         
         const data = await response.json();
         
-        // 🔍 DEBUG: Log the actual structure we're getting
-        console.log('📥 Raw game data structure:', {
-            hasGameData: !!data.gameData,
-            hasLiveData: !!data.liveData,
-            topLevelKeys: Object.keys(data),
-            gameDataKeys: data.gameData ? Object.keys(data.gameData) : 'missing',
-            liveDataKeys: data.liveData ? Object.keys(data.liveData) : 'missing'
-        });
+        // Find the specific game by ID
+        const game = data.dates?.[0]?.games?.find(g => g.gamePk.toString() === gameId.toString());
         
-        // ✅ IMPROVED: More flexible structure checking
-        if (!data) {
-            throw new Error('No data received from API');
-        }
-        
-        // Check for game completion using multiple possible paths
-        let gameStatus = null;
-        let gameStatusText = '';
-        
-        // Try different possible status locations
-        if (data.gameData?.status?.statusCode) {
-            gameStatus = data.gameData.status.statusCode;
-            gameStatusText = data.gameData.status.detailedState || '';
-        } else if (data.status?.statusCode) {
-            gameStatus = data.status.statusCode;
-            gameStatusText = data.status.detailedState || '';
-        } else {
-            console.log('❌ Could not find game status in response');
-            console.log('Available data keys:', Object.keys(data));
+        if (!game) {
+            console.log(`❌ Game ${gameId} not found in ${searchDate} schedule`);
             return null;
         }
         
         // Check if game is finished
-        if (gameStatus !== 'F' && gameStatus !== 'O') {
-            console.log(`Game ${gameId} not finished yet. Status: ${gameStatus} - ${gameStatusText}`);
+        if (game.status?.statusCode !== 'F') {
+            console.log(`⏳ Game ${gameId} not finished yet. Status: ${game.status?.detailedState}`);
             return null;
         }
         
-        // ✅ IMPROVED: More flexible score extraction
-        let homeScore = 0;
-        let awayScore = 0;
+        // Extract scores and winner info (it's right there in the schedule!)
+        const homeScore = game.teams.home.score || 0;
+        const awayScore = game.teams.away.score || 0;
+        const homeWon = game.teams.home.isWinner || false;
+        const awayWon = game.teams.away.isWinner || false;
         
-        // Try multiple possible score locations
-        if (data.liveData?.linescore?.teams) {
-            homeScore = data.liveData.linescore.teams.home?.runs || 0;
-            awayScore = data.liveData.linescore.teams.away?.runs || 0;
-        } else if (data.linescore?.teams) {
-            homeScore = data.linescore.teams.home?.runs || 0;
-            awayScore = data.linescore.teams.away?.runs || 0;
-        } else if (data.teams) {
-            // Sometimes scores are directly in teams object
-            homeScore = data.teams.home?.score || data.teams.home?.runs || 0;
-            awayScore = data.teams.away?.score || data.teams.away?.runs || 0;
-        } else {
-            console.log('❌ Could not find scores in response');
-            console.log('Available liveData keys:', data.liveData ? Object.keys(data.liveData) : 'no liveData');
-            return null;
-        }
-        
-        // Determine winner
-        let winner = null;
-        if (homeScore > awayScore) {
-            winner = 'home';
-        } else if (awayScore > homeScore) {
-            winner = 'away';
-        } else {
-            winner = 'tie';
-        }
-        
-        // ✅ IMPROVED: More flexible team data extraction
-        let homeTeam, awayTeam;
-        
-        if (data.gameData?.teams) {
-            homeTeam = data.gameData.teams.home;
-            awayTeam = data.gameData.teams.away;
-        } else if (data.teams) {
-            homeTeam = data.teams.home;
-            awayTeam = data.teams.away;
-        } else {
-            console.log('❌ Could not find team data in response');
-            return null;
-        }
+        let winner = 'tie';
+        if (homeWon) winner = 'home';
+        else if (awayWon) winner = 'away';
         
         const result = {
             gameId: gameId,
@@ -486,21 +483,22 @@ const fetchMLBGameResult = async (gameId, sport) => {
             awayScore: awayScore,
             winner: winner,
             homeTeam: {
-                name: homeTeam.team?.name || homeTeam.name || 'Home Team',
-                abbreviation: homeTeam.team?.abbreviation || homeTeam.abbreviation || 'HOME',
+                name: game.teams.home.team.name,
+                abbreviation: getTeamAbbreviation(game.teams.home.team.name),
                 score: homeScore
             },
             awayTeam: {
-                name: awayTeam.team?.name || awayTeam.name || 'Away Team',
-                abbreviation: awayTeam.team?.abbreviation || awayTeam.abbreviation || 'AWAY',
+                name: game.teams.away.team.name,
+                abbreviation: getTeamAbbreviation(game.teams.away.team.name),
                 score: awayScore
             },
             completedAt: new Date(),
-            rawGameData: data // Keep for debugging
+            rawGameData: game
         };
         
-        console.log('✅ Successfully parsed game result:', {
+        console.log('✅ Successfully parsed game result from schedule:', {
             gameId,
+            searchDate,
             homeScore,
             awayScore,
             winner,
@@ -511,7 +509,7 @@ const fetchMLBGameResult = async (gameId, sport) => {
         return result;
         
     } catch (error) {
-        console.error(`Error fetching MLB game result for ${gameId}:`, error);
+        console.error(`❌ Error fetching game result for ${gameId}:`, error.message);
         return null;
     }
 };
@@ -571,21 +569,6 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 }
                 return updatedParsedItem;
             }
-            // For gameResult, if it's from a previous day, invalidate it.
-            if (keyPrefix === 'todaysGameResult' && parsedItem) {
-                const gameResultDate = new Date(parsedItem.completedAt).toISOString().split('T')[0];
-                if (gameResultDate !== today) { // 'today' is defined in App component, so passing it here might be an issue if this is truly global.
-                                              // For now, let's assume `today` is passed correctly or handle it more generically.
-                                              // Given useLocalStorage is a global helper, let's make it robust to dates.
-                    const now = new Date();
-                    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                    if (gameResultDate !== currentDate) {
-                        console.log('🗑️ Invalidating old game result from cache.');
-                        return initialValue; // Invalidate the old result
-                    }
-                }
-            }
-
 
             return parsedItem;
         } catch (error) {
@@ -957,8 +940,7 @@ const handleNativeShare = async (text, url = '', title = 'Streak Pick\'em') => {
 
     // Fallback: Copy to clipboard
     try {
-        const fullText = url ? `${text}\n\n${url}` : text;
-        document.execCommand('copy', false, fullText); // Use document.execCommand for broader compatibility in iframes
+        document.execCommand('copy', false, url ? `${text}\n\n${url}` : text); // Use document.execCommand for broader compatibility in iframes
         return true;
     } catch (error) {
         console.error('Clipboard access failed:', error);
@@ -1316,6 +1298,53 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
 };
 
 /**
+ * GameResultDisplay Component - Shows final game results
+ * @param {Object} props
+ * @param {Object} props.result - The game result object.
+ * @param {Object} props.todaysMatchup - The matchup details.
+ * @param {Object} props.userPick - The user's pick for today.
+ */
+const GameResultDisplay = ({ result, todaysMatchup, userPick }) => {
+    if (!result || !todaysMatchup) return null;
+    
+    const winnerTeam = result.winner === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam;
+    const userPickedTeam = userPick?.selectedTeam ? (userPick.selectedTeam === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam) : null;
+    const userWasCorrect = userPick?.selectedTeam === result.winner;
+    
+    return (
+        <div className="mt-4 bg-bg-tertiary rounded-xl p-4 border-2 border-bg-tertiary">
+            <div className="text-center mb-3">
+                <h4 className="font-bold text-lg text-text-primary mb-2">🏆 Final Result</h4>
+                <div className="text-2xl font-bold">
+                    <span className={result.winner === 'home' ? 'text-accent-win' : 'text-text-primary'}>
+                        {todaysMatchup.homeTeam.abbr} {result.homeScore}
+                    </span>
+                    <span className="text-text-secondary mx-2">-</span>
+                    <span className={result.winner === 'away' ? 'text-accent-win' : 'text-text-primary'}>
+                        {result.awayScore} {todaysMatchup.awayTeam.abbr}
+                    </span>
+                </div>
+                <p className="text-sm text-text-secondary mt-1">
+                    Winner: {winnerTeam.name}
+                </p>
+            </div>
+            
+            {userPick && (
+                <div className={`text-center p-3 rounded-lg ${userWasCorrect ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                    <p className={`font-semibold ${userWasCorrect ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                        {userWasCorrect ? '✅ You were CORRECT!' : '❌ You were wrong'}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                        You picked: {userPickedTeam?.name || 'N/A'}
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+/**
  * LeaderboardEntry component for a single row in the leaderboard.
  * @param {Object} props
  * @param {LeaderboardEntry} props.entry - The leaderboard entry data.
@@ -1604,8 +1633,6 @@ const ErrorDisplay = ({ message }) => (
 const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
-    // Removed debugInfo state as platform-specific info is no longer desired in logs
-    // [debugInfo, setDebugInfo] = useState({});
 
     useEffect(() => {
         if (!startTime) {
@@ -1616,22 +1643,15 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
 
         // Ensured robust date parsing
         let parsedTime = null;
-        // Removed debugSteps as platform-specific info is no longer desired in logs
-        // const debugSteps = [];
 
         try {
             parsedTime = new Date(startTime);
             if (isNaN(parsedTime.getTime())) {
                 throw new Error('Invalid date');
             }
-            // Removed debugSteps logging
-            // debugSteps.push(`Parsed "${startTime}" to Date`);
-            // debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
-            // debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
             
             setGameTime(parsedTime);
             setError(null);
-            // setDebugInfo({ steps: debugSteps, success: true });
             
 
         } catch (parseError) {
@@ -1639,7 +1659,6 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
             setGameTime(fallbackTime);
             setError(`Parse failed: ${parseError.message}`);
-            // setDebugInfo({ steps: debugSteps, error: parseError.message });
         }
     }, [startTime, matchupId]);
 
@@ -1707,48 +1726,6 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
 };
 
 
-// Step 6: Create GameResultDisplay Component
-const GameResultDisplay = ({ result, todaysMatchup, userPick }) => {
-    if (!result || !todaysMatchup) return null;
-    
-    const winnerTeam = result.winner === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam;
-    // Ensure userPick and selectedTeam exist before accessing
-    const userPickedTeam = userPick?.selectedTeam ? (userPick.selectedTeam === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam) : null;
-    const userWasCorrect = userPick?.selectedTeam === result.winner;
-    
-    return (
-        <div className="mt-4 bg-bg-tertiary rounded-xl p-4 border-2 border-bg-tertiary">
-            <div className="text-center mb-3">
-                <h4 className="font-bold text-lg text-text-primary mb-2">Final Result</h4>
-                <div className="text-2xl font-bold">
-                    <span className={result.winner === 'home' ? 'text-accent-win' : 'text-text-primary'}>
-                        {todaysMatchup.homeTeam.abbr} {result.homeScore}
-                    </span>
-                    <span className="text-text-secondary mx-2">-</span>
-                    <span className={result.winner === 'away' ? 'text-accent-win' : 'text-text-primary'}>
-                        {result.awayScore} {todaysMatchup.awayTeam.abbr}
-                    </span>
-                </div>
-                <p className="text-sm text-text-secondary mt-1">
-                    Winner: {winnerTeam.name}
-                </p>
-            </div>
-            
-            {userPick && (
-                <div className={`text-center p-3 rounded-lg ${userWasCorrect ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
-                    <p className={`font-semibold ${userWasCorrect ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
-                        {userWasCorrect ? '✅ You were CORRECT!' : '❌ You were wrong'}
-                    </p>
-                    <p className="text-sm text-text-secondary">
-                        You picked: {userPickedTeam?.name || 'N/A'}
-                    </p>
-                </div>
-            )}
-        </div>
-    );
-};
-
-
 // ========== APP COMPONENT WITH FIXES ==========
 /**
  * Modified App component with comprehensive debugging
@@ -1757,14 +1734,6 @@ const App = ({ user }) => {
     const userId = user?.id || 'anonymous';
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     
-    // Step 1: Add New State Variables
-    const [gameResult, setGameResult] = useState(null);
-    const [resultLoading, setResultLoading] = useState(false);
-
-    // Step 2: Add Result Caching to localStorage
-    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId);
-
-
     // Share analytics state
     const [shareStats, setShareStats] = useLocalStorage('shareStats', {
         totalShares: 0,
@@ -1774,6 +1743,11 @@ const App = ({ user }) => {
     }, userId); 
     // Game results history storage
     const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
+
+    // Add these new state variables in the App component
+    const [gameResult, setGameResult] = useState(null);
+    const [resultLoading, setResultLoading] = useState(false);
+    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId);
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -1901,265 +1875,6 @@ const App = ({ user }) => {
     }, [todaysMatchup?.startTime]);
 
 
-    // Step 4: Create Result Fetching Function
-    const fetchAndDisplayResult = useCallback(async () => {
-        if (!todaysMatchup || resultLoading) return;
-        
-        setResultLoading(true);
-        try {
-            const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport);
-            if (result) {
-                setGameResult(result);
-                setTodaysGameResult(result); // Cache it
-                // Also, if a pick was made, update streak based on this result
-                if (hasPickedToday && userState.todaysPick && result.completedAt) {
-                    const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
-                    const actualWinner = result.winner; // 'home', 'away', or 'tie'
-                    let isCorrect = userPickedTeam === actualWinner;
-
-                    // Treat ties as correct to keep streak going, unless specific rule.
-                    // For baseball, ties are extremely rare and usually resolved in extra innings.
-                    // If the game is final and it's a tie, let's consider it correct for simplicity.
-                    if (actualWinner === 'tie') {
-                        isCorrect = true;
-                    }
-
-                    setIsStreakIncreasing(isCorrect); // Set for animation
-
-                    setUserState(prev => {
-                        const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
-                        const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-
-                        return {
-                            ...prev,
-                            correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                            currentStreak: newCurrentStreak,
-                            bestStreak: newBestStreak,
-                            weeklyStats: {
-                                ...prev.weeklyStats,
-                                correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
-                                picks: prev.weeklyStats.picks + 1
-                            }
-                        };
-                    });
-
-                    setGameResults(prev => [
-                        ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
-                        {
-                            gameId: userState.todaysPick.matchupId,
-                            userPick: userState.todaysPick.selectedTeam,
-                            actualWinner: result.winner,
-                            isCorrect: isCorrect,
-                            finalScore: `${result.homeScore}-${result.awayScore}`,
-                            checkedAt: new Date().toISOString(),
-                            gameDate: todaysMatchup.startTime
-                        }
-                    ]);
-
-                    const resultMessage = isCorrect ?
-                        `🎉 Correct! ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.` :
-                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.abbr : todaysMatchup.awayTeam.abbr}, but ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.`;
-
-                    addNotification({
-                        type: isCorrect ? 'success' : 'error',
-                        message: resultMessage
-                    });
-                    playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
-
-                    setTimeout(() => setIsStreakIncreasing(false), 1500);
-                }
-            }
-        } catch (error) {
-            console.error('Error fetching game result for display:', error);
-            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
-        } finally {
-            setResultLoading(false);
-        }
-    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, setUserState, setGameResults, addNotification, playSound]);
-
-
-    // Step 3: Create Auto Result Fetching Logic
-    useEffect(() => {
-        // Only fetch if we have a matchup, game has started, and we don't already have the result
-        if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
-        
-        const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
-        const now = new Date();
-        
-        if (now > estimatedGameEnd) {
-            // Game should be over, fetch result immediately
-            fetchAndDisplayResult();
-        } else {
-            // Set timer to fetch when game should be over, plus a 30min buffer
-            const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
-            if (timeUntilCheck > 0) { // Only set timeout if timeUntilCheck is positive
-                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
-                const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
-                return () => clearTimeout(timerId); // Cleanup on unmount or re-run
-            }
-        }
-    }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
-
-
-    // Step 5: Load Cached Result on Page Load
-    useEffect(() => {
-        if (todaysGameResult && !gameResult) {
-            // Ensure the cached result is for today's game
-            const cachedResultDate = new Date(todaysGameResult.completedAt).toISOString().split('T')[0];
-            if (cachedResultDate === today && todaysMatchup && todaysGameResult.gameId === todaysMatchup.id) {
-                setGameResult(todaysGameResult);
-            } else {
-                // If cached result is old or for a different game, clear it
-                setTodaysGameResult(null);
-            }
-        }
-    }, [todaysGameResult, gameResult, today, todaysMatchup, setTodaysGameResult]);
-
-
-    /**
-     * Checks the actual result of a user's pick (REPLACES simulateResult)
-     * This is now primarily for *initial* pick verification/streak update,
-     * the auto-fetch will handle the display result.
-     * @param {Object} pick - The user's pick object
-     * @param {Matchup} matchup - The matchup details
-     * @param {number} attempt - Current retry attempt count
-     */
-    const checkRealResult = useCallback(async (pick, matchup, attempt = 1) => {
-        const MAX_ATTEMPTS = 3; // Retry up to 3 times
-        const RETRY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour between retries
-
-        // Estimate game duration (sport-specific)
-        const gameDurations = {
-            'MLB': 3 * 60 * 60 * 1000,    // 3 hours
-            'NBA': 2.5 * 60 * 60 * 1000,  // 2.5 hours
-            'NFL': 3.5 * 60 * 60 * 1000,  // 3.5 hours
-            'NHL': 2.5 * 60 * 60 * 1000,  // 2.5 hours
-            'Soccer': 2 * 60 * 60 * 1000, // 2 hours
-            'NCAAB': 2 * 60 * 60 * 1000 // 2 hours
-        };
-
-        const estimatedGameDuration = gameDurations[matchup.sport] || 3 * 60 * 60 * 1000;
-        const estimatedEndTime = new Date(new Date(matchup.startTime).getTime() + estimatedGameDuration);
-
-        // Calculate delay: check 30 minutes after estimated end time (minimum 5 seconds for first check)
-        const now = new Date();
-        const checkTime = new Date(estimatedEndTime.getTime() + 30 * 60 * 1000);
-        const initialDelayMs = Math.max(checkTime.getTime() - now.getTime(), 5000);
-
-        // Use initialDelayMs for the first attempt, then RETRY_INTERVAL_MS for subsequent
-        const delayForThisAttempt = attempt === 1 ? initialDelayMs : RETRY_INTERVAL_MS;
-
-        console.log(`Will check result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr} (Attempt ${attempt}) in ${Math.round(delayForThisAttempt / 1000 / 60)} minutes.`);
-
-        setTimeout(async () => {
-            try {
-                console.log(`Checking result for game ${pick.matchupId} (Attempt ${attempt})...`);
-
-                let gameResultFromFetch = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
-
-                if (!gameResultFromFetch) {
-                    if (attempt < MAX_ATTEMPTS) {
-                        console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
-                        // Schedule next attempt recursively
-                        checkRealResult(pick, matchup, attempt + 1);
-                        return;
-                    } else {
-                        console.log(`Max retry attempts (${MAX_ATTEMPTS}) reached for game ${pick.matchupId}. Result unavailable.`);
-                        addNotification({
-                            type: 'warning',
-                            message: `Could not get result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-                        });
-                        return;
-                    }
-                }
-                // If result is fetched successfully, set it globally and cache it
-                setGameResult(gameResultFromFetch);
-                setTodaysGameResult(gameResultFromFetch);
-
-                // Determine if user's pick was correct
-                const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
-                const actualWinner = gameResultFromFetch.winner; // 'home', 'away', or 'tie'
-
-                let isCorrect = false;
-                let resultMessage = '';
-
-                if (actualWinner === 'tie') {
-                    // Handle ties - could be considered correct, or push (no win/loss)
-                    isCorrect = true; // For now, treat ties as wins to avoid frustrating users
-                    resultMessage = `🤝 Tie Game! ${gameResultFromFetch.homeTeam.abbreviation} ${gameResultFromFetch.homeScore} - ${gameResultFromFetch.awayTeam.abbreviation} ${gameResultFromFetch.awayScore}. Streak continues!`;
-                } else if (userPickedTeam === actualWinner) {
-                    isCorrect = true;
-                    const winningTeam = actualWinner === 'home' ? gameResultFromFetch.homeTeam : gameResultFromFetch.awayTeam;
-                    resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}. Streak: ${userState.currentStreak + 1}!`;
-                } else {
-                    isCorrect = false;
-                    const winningTeam = actualWinner === 'home' ? gameResultFromFetch.homeTeam : gameResultFromFetch.awayTeam;
-                    const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
-                    resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}. Streak reset.`;
-                }
-
-                setIsStreakIncreasing(isCorrect); // Set for animation
-
-                // Update user state with real result
-                setUserState(prev => {
-                    const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
-                    const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-
-                    return {
-                        ...prev,
-                        correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                        currentStreak: newCurrentStreak,
-                        bestStreak: newBestStreak,
-                        weeklyStats: {
-                            ...prev.weeklyStats,
-                            correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
-                            picks: prev.weeklyStats.picks + 1 // Increment weekly picks too
-                        }
-                    };
-                });
-
-                // Store game result history
-                setGameResults(prev => [
-                    ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
-                    {
-                        gameId: pick.matchupId,
-                        userPick: pick.selectedTeam,
-                        actualWinner: gameResultFromFetch.winner,
-                        isCorrect: isCorrect,
-                        finalScore: `${gameResultFromFetch.homeScore}-${gameResultFromFetch.awayScore}`,
-                        checkedAt: new Date().toISOString(),
-                        gameDate: matchup.startTime // startTime is already ISO string
-                    }
-                ]);
-
-                // Show result notification
-                addNotification({
-                    type: isCorrect ? 'success' : 'error',
-                    message: resultMessage
-                });
-
-                playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
-
-                // Log for debugging
-                console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
-                console.log(`Game: ${gameResultFromFetch.homeTeam.name} ${gameResultFromFetch.homeScore} - ${gameResultFromFetch.awayTeam.abbreviation} ${gameResultFromFetch.awayScore}`); // Fixed: Display away team abbr
-
-            } catch (error) {
-                console.error('Error processing game result:', error);
-                // Fallback: don't update streak, just notify user
-                addNotification({
-                    type: 'warning',
-                    message: `Error verifying result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-                });
-            } finally {
-                // Ensure streak increasing state is reset after a brief period
-                setTimeout(() => setIsStreakIncreasing(false), 1500);
-            }
-        }, delayForThisAttempt);
-
-    }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats, setGameResult, setTodaysGameResult]);
-
-
     /**
      * Handles a user making a pick - UPDATED to use real results
      * @param {'home' | 'away'} teamChoice - 'home' or 'away' team.
@@ -2204,10 +1919,110 @@ const App = ({ user }) => {
         playSound('pick_select');
 
         // Always check real result since we only load real MLB games now
-        // This initial call *sets the timer* to check later, it doesn't fetch immediately.
-        checkRealResult(newPick, todaysMatchup);
+        // This will now be handled by the useEffect after a game ends.
+        // The manual button and auto-fetch logic will take care of calling fetchAndDisplayResult.
 
-    }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult]);
+    }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound]);
+
+
+    // Add this function inside your App component
+    const fetchAndDisplayResult = useCallback(async () => {
+        if (!todaysMatchup || resultLoading) return;
+        
+        setResultLoading(true);
+        try {
+            const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport, todaysMatchup.startTime);
+            if (result) {
+                setGameResult(result);
+                setTodaysGameResult(result); // Cache it
+                
+                // Update streak based on result if user made a pick
+                if (hasPickedToday && userState.todaysPick && result.completedAt) {
+                    const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
+                    const actualWinner = result.winner; // 'home', 'away', or 'tie'
+                    let isCorrect = userPickedTeam === actualWinner;
+
+                    // Treat ties as correct to keep streak going
+                    if (actualWinner === 'tie') {
+                        isCorrect = true;
+                    }
+
+                    setIsStreakIncreasing(isCorrect); // Set for animation
+
+                    setUserState(prev => {
+                        const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
+                        const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
+
+                        return {
+                            ...prev,
+                            correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
+                            currentStreak: newCurrentStreak,
+                            bestStreak: newBestStreak,
+                            weeklyStats: {
+                                ...prev.weeklyStats,
+                                correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0)
+                            }
+                        };
+                    });
+
+                    const resultMessage = isCorrect ?
+                        `🎉 Correct! ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.` :
+                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.abbr : todaysMatchup.awayTeam.abbr}, but ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}.`;
+
+                    addNotification({
+                        type: isCorrect ? 'success' : 'error',
+                        message: resultMessage
+                    });
+                    playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+
+                    setTimeout(() => setIsStreakIncreasing(false), 1500);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching game result for display:', error);
+            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
+        } finally {
+            setResultLoading(false);
+        }
+    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, setUserState, addNotification, playSound]);
+
+    // Add these useEffect hooks in your App component
+
+    // Auto-fetch results when game should be finished
+    useEffect(() => {
+        // Only fetch if we have a matchup, game has started, and we don't already have the result
+        if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
+        
+        const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
+        const now = new Date();
+        
+        if (now > estimatedGameEnd) {
+            // Game should be over, fetch result immediately
+            fetchAndDisplayResult();
+        } else {
+            // Set timer to fetch when game should be over, plus a 30min buffer
+            const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
+            if (timeUntilCheck > 0) {
+                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
+                const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
+                return () => clearTimeout(timerId);
+            }
+        }
+    }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
+
+    // Load cached result on page load
+    useEffect(() => {
+        if (todaysGameResult && !gameResult) {
+            // Ensure the cached result is for today's game
+            const cachedResultDate = new Date(todaysGameResult.completedAt).toISOString().split('T')[0];
+            if (cachedResultDate === today && todaysMatchup && todaysGameResult.gameId === todaysMatchup.id) {
+                setGameResult(todaysGameResult);
+            } else {
+                // If cached result is old or for a different game, clear it
+                setTodaysGameResult(null);
+            }
+        }
+    }, [todaysGameResult, gameResult, today, todaysMatchup, setTodaysGameResult]);
 
 
     const handleToggleTheme = useCallback(() => {
@@ -2303,8 +2118,6 @@ const App = ({ user }) => {
         userState.displayName,
         updateLeaderboard
     ]);
-
-    // Removed debugPlatform function and its call as per "no platform detection" rule.
 
 
     // Simple loading check - no complex logic
@@ -2918,29 +2731,50 @@ const App = ({ user }) => {
                             <div className="text-red-500">⚠️ No game time available</div>
                         )}
                         
-                        <p className="text-lg font-semibold text-text-primary">
-                            ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
-                        </p>
+                        {/* Show game result if available, otherwise show timer */}
+                        {gameResult ? (
+                            <div>
+                                <p className="text-lg font-semibold text-accent-win mb-2">
+                                    🏆 Game Finished!
+                                </p>
+                                <GameResultDisplay 
+                                    result={gameResult} 
+                                    todaysMatchup={todaysMatchup} 
+                                    userPick={userState.todaysPick} 
+                                />
+                            </div>
+                        ) : (
+                            <p className="text-lg font-semibold text-text-primary">
+                                ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
+                            </p>
+                        )}
                     </div>
                     
                     {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
                     {(hasPickedToday || gameStarted) && (
-                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20">
+                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
                             <p className="font-semibold text-text-primary">
                                 {hasPickedToday ?
                                     `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
                                     '🔒 Game has started!'
                                 }
                             </p>
-                            
-                            {/* NEW: Game Result Display */}
-                            {gameResult ? (
-                                <GameResultDisplay 
-                                    result={gameResult} 
-                                    todaysMatchup={todaysMatchup} 
-                                    userPick={userState.todaysPick} 
-                                />
-                            ) : gameStarted && (
+                            <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>
+                            {/* Share Pick Button (Option B) */}
+                            {hasPickedToday && userState.currentStreak > 0 && (
+                                <div className="mt-4 text-center">
+                                    <button
+                                        onClick={() => setShowShareModal(true)}
+                                        className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 shadow-md"
+                                        aria-label="Share this pick"
+                                    >
+                                        📱 Share This Pick
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Add this inside the "hasPickedToday || gameStarted" section */}
+                            {gameStarted && !gameResult && (
                                 <div className="mt-3">
                                     {resultLoading ? (
                                         <p className="text-sm text-text-secondary">🔍 Checking game result...</p>
@@ -2952,21 +2786,6 @@ const App = ({ user }) => {
                                             🔍 Check Game Result
                                         </button>
                                     )}
-                                </div>
-                            )}
-                            
-                            {!gameResult && <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>}
-                            
-                            {/* Existing share button code stays exactly the same */}
-                            {hasPickedToday && userState.currentStreak > 0 && (
-                                <div className="mt-4 text-center">
-                                    <button
-                                        onClick={() => setShowShareModal(true)}
-                                        className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 shadow-md"
-                                        aria-label="Share this pick"
-                                    >
-                                        📱 Share This Pick
-                                    </button>
                                 </div>
                             )}
                         </div>
@@ -3106,68 +2925,22 @@ const App = ({ user }) => {
 // --- Whop Integration Wrapper ---
 
 export default function Page() {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [isWhopUser, setIsWhopUser] = useState(false);
+    const { user, isLoading, isAuthenticated, hasAccess, error } = useWhop();
+    const [isWhopUser, setIsWhopUser] = useState(false); // To track if the user is a real Whop user or a test user
 
     useEffect(() => {
-        async function getUser() {
-            try {
-                console.log('Checking for Whop user...');
-                
-                // FIX: Use window.location.origin to build complete URL
-                const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-                
-                // First, try to get real Whop user from headers
-                const whopResponse = await fetch(`${baseUrl}/api/whop/user`, {
-                    method: 'GET',
-                    credentials: 'include'
-                });
-
-                if (whopResponse.ok) {
-                    const whopUser = await whopResponse.json();
-                    console.log('Found real Whop user:', whopUser);
-                    setUser(whopUser);
-                    setIsWhopUser(true);
-                    setLoading(false);
-                    return;
-                }
-
-                console.log('No Whop user found, checking for dev mode...');
-                
-                // If we're in development or testing, use test user
-                const testUser = {
-                    id: 'test_user_' + Date.now(),
-                    username: 'TestPlayer' + Math.floor(Math.random() * 1000),
-                    email: 'test@streakpicks.com',
-                    name: 'Test Player'
-                };
-                
-                console.log('Using test user for development');
-                setUser(testUser);
+        // If user is authenticated via Whop, set isWhopUser to true
+        if (isAuthenticated && user) {
+            setIsWhopUser(true);
+        } else {
+            // Fallback to test user if not authenticated
+            if (!isLoading) { // Only set test user once loading is complete and no real user found
                 setIsWhopUser(false);
-
-            } catch (error) {
-                console.error('Error getting user:', error);
-                
-                // Fallback to test user on any error
-                const testUser = {
-                    id: 'fallback_user_' + Date.now(),
-                    username: 'FallbackPlayer',
-                    email: 'fallback@streakpicks.com',
-                    name: 'Fallback Player'
-                };
-                setUser(testUser);
-                setIsWhopUser(false);
-            } finally {
-                setLoading(false);
             }
         }
+    }, [user, isLoading, isAuthenticated]);
 
-        getUser();
-    }, []);
-
-    if (loading) {
+    if (isLoading) {
         return (
             <div className="min-h-screen bg-white flex items-center justify-center">
                 <div className="text-center">
@@ -3178,7 +2951,7 @@ export default function Page() {
         );
     }
 
-    // Show a banner if using test user
+    // Pass user data (either real or test) to the App component
     return (
         <div>
             {!isWhopUser && (
@@ -3191,4 +2964,3 @@ export default function Page() {
         </div>
     );
 }
-
