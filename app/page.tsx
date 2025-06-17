@@ -365,7 +365,7 @@ const getMLBTeamColors = (abbr) => {
         'SF': ['FD5A1E', '27251F']  // Orange, Black
     };
     
-    return teamColors[abbr] || ['505050', '808080']; // Default gray colors
+    return teamColors[abbr] || ['FF0000', '00FF00']; // RED and GREEN
 };
 
 /**
