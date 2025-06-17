@@ -42,8 +42,9 @@ const useWhop = () => {
 
         const checkAuthStatus = async () => {
             try {
-                // Check if user is authenticated by looking for auth cookie
-                const response = await fetch('/api/auth/check', {
+                // FIX: Prepend window.location.origin for absolute URL
+                const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+                const response = await fetch(`${baseUrl}/api/auth/check`, {
                     method: 'GET',
                     credentials: 'include',
                     headers: {
@@ -121,7 +122,7 @@ const useWhop = () => {
  * @typedef {Object} Team
  * @property {string} name - Full team name.
  * @property {string} abbr - Team abbreviation.
- * @property {string} logo - Emoji logo for the sport.
+ * @property {string | string[]} logo - Logo URL(s) or emoji for the sport.
  * @property {string[]} colors - Primary and secondary team colors (hex codes).
  */
 
@@ -299,6 +300,187 @@ const getMLBTeamColors = (abbr) => {
 };
 
 /**
+ * Function to get MLB team logos with multiple CDN fallbacks.
+ * Returns an array of URLs, with the last element being an emoji fallback.
+ * This function handles the team logo URLs, and the component will handle trying them.
+ * @param {string} abbr - Team abbreviation.
+ * @returns {string[]} An array of logo URLs and a final emoji fallback.
+ */
+const getMLBTeamLogo = (abbr) => {
+    // Define multiple CDN sources for each team logo
+    const teamLogos = {
+        // American League East
+        'BAL': [
+            'https://www.mlbstatic.com/team-logos/110.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/BAL.png',
+            'https://logos-world.net/wp-content/uploads/2020/05/Baltimore-Orioles-Logo.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/bal.png' // ESPN fallback
+        ],
+        'BOS': [
+            'https://www.mlbstatic.com/team-logos/111.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/BOS.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/bos.png'
+        ],
+        'NYY': [
+            'https://www.mlbstatic.com/team-logos/147.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/NYY.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png'
+        ],
+        'TB': [
+            'https://www.mlbstatic.com/team-logos/139.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/TBR.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/tb.png'
+        ],
+        'TOR': [
+            'https://www.mlbstatic.com/team-logos/141.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/TOR.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/tor.png'
+        ],
+        
+        // American League Central
+        'CWS': [
+            'https://www.mlbstatic.com/team-logos/145.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/CHW.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/chw.png'
+        ],
+        'CLE': [
+            'https://www.mlbstatic.com/team-logos/114.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/CLE.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/cle.png'
+        ],
+        'DET': [
+            'https://www.mlbstatic.com/team-logos/116.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/DET.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/det.png'
+        ],
+        'KC': [
+            'https://www.mlbstatic.com/team-logos/118.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/KCR.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/kc.png'
+        ],
+        'MIN': [
+            'https://www.mlbstatic.com/team-logos/142.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/MIN.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/min.png'
+        ],
+        
+        // American League West
+        'HOU': [
+            'https://www.mlbstatic.com/team-logos/117.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/HOU.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/hou.png'
+        ],
+        'LAA': [
+            'https://www.mlbstatic.com/team-logos/108.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/LAA.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/laa.png'
+        ],
+        'OAK': [
+            'https://www.mlbstatic.com/team-logos/133.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/OAK.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/oak.png'
+        ],
+        'SEA': [
+            'https://www.mlbstatic.com/team-logos/136.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/SEA.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/sea.png'
+        ],
+        'TEX': [
+            'https://www.mlbstatic.com/team-logos/140.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/TEX.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/tex.png'
+        ],
+        
+        // National League East
+        'ATL': [
+            'https://www.mlbstatic.com/team-logos/144.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/ATL.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/atl.png'
+        ],
+        'MIA': [
+            'https://www.mlbstatic.com/team-logos/146.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/MIA.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/mia.png'
+        ],
+        'NYM': [
+            'https://www.mlbstatic.com/team-logos/121.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/NYM.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/nym.png'
+        ],
+        'PHI': [
+            'https://www.mlbstatic.com/team-logos/143.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/PHI.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/phi.png'
+        ],
+        'WSH': [
+            'https://www.mlbstatic.com/team-logos/120.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/WSN.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/wsh.png'
+        ],
+        
+        // National League Central
+        'CHC': [
+            'https://www.mlbstatic.com/team-logos/112.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/CHC.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/chc.png'
+        ],
+        'CIN': [
+            'https://www.mlbstatic.com/team-logos/113.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/CIN.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/cin.png'
+        ],
+        'MIL': [
+            'https://www.mlbstatic.com/team-logos/158.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/MIL.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/mil.png'
+        ],
+        'PIT': [
+            'https://www.mlbstatic.com/team-logos/134.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/PIT.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/pit.png'
+        ],
+        'STL': [
+            'https://www.mlbstatic.com/team-logos/138.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/STL.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/stl.png'
+        ],
+        
+        // National League West
+        'ARI': [
+            'https://www.mlbstatic.com/team-logos/109.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/ARI.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/ari.png'
+        ],
+        'COL': [
+            'https://www.mlbstatic.com/team-logos/115.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/COL.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/col.png'
+        ],
+        'LAD': [
+            'https://www.mlbstatic.com/team-logos/119.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/LAD.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/lad.png'
+        ],
+        'SD': [
+            'https://www.mlbstatic.com/team-logos/135.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/SDP.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/sd.png'
+        ],
+        'SF': [
+            'https://www.mlbstatic.com/team-logos/137.svg',
+            'https://cdn.ssref.net/req/202311091/tlogo/br/SFG.png',
+            'https://a.espncdn.com/i/teamlogos/mlb/500/sf.png'
+        ]
+    };
+    
+    // Always include a generic baseball emoji as the absolute last fallback
+    const genericFallback = '⚾';
+    const logos = teamLogos[abbr] || [];
+    return [...logos, genericFallback]; // Ensure emoji is always the last fallback
+};
+
+
+/**
  * SINGLE SOURCE OF TRUTH - Gets today's MLB game
  * NO FALLBACKS, NO SIMULATIONS, NO EXCEPTIONS
  */
@@ -353,13 +535,13 @@ const getTodaysMLBGame = async () => {
             homeTeam: {
                 name: game.teams.home.team.name,
                 abbr: game.teams.home.team.abbreviation,
-                logo: '⚾',
+                logo: getMLBTeamLogo(game.teams.home.team.abbreviation), // Pass abbr to get array of logos
                 colors: getMLBTeamColors(game.teams.home.team.abbreviation) 
             },
             awayTeam: {
                 name: game.teams.away.team.name,
                 abbr: game.teams.away.team.abbreviation,
-                logo: '⚾',
+                logo: getMLBTeamLogo(game.teams.away.team.abbreviation), // Pass abbr to get array of logos
                 colors: getMLBTeamColors(game.teams.away.team.abbreviation) 
             },
             sport: 'MLB',
@@ -432,7 +614,7 @@ const fetchMLBGameResult = async (gameId, sport, gameDate) => {
         let searchDate;
         if (gameDate) {
             // Extract date from the game's startTime
-            searchDate = new Date(gameDate).toISOString().split('T')[0]; // YYYY-MM-DD format
+            searchDate = new Date(gameDate).toISOString().split('T')[0]; //YYYY-MM-DD format
         } else {
             // Fallback to today if no gameDate provided
             searchDate = new Date().toISOString().split('T')[0];
@@ -647,7 +829,8 @@ const useSound = (soundEnabled) => {
         if (typeof window !== 'undefined' && !audioContext.current) {
             try {
                 audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
-            } catch (e) {
+            }
+            catch (e) {
                 console.warn('AudioContext not supported:', e);
             }
         }
@@ -1259,6 +1442,27 @@ const AnimatedStreakDisplay = ({ currentStreak, bestStreak, isIncreasing }) => {
  */
 const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => {
     const [primaryColor, secondaryColor] = team.colors;
+    const [currentLogoIndex, setCurrentLogoIndex] = useState(0);
+
+    // Reset currentLogoIndex when the team changes (e.g., new day, new matchup)
+    useEffect(() => {
+        setCurrentLogoIndex(0);
+    }, [team.abbr]); // Assuming abbr changes with the team
+
+    // Handle image loading errors by trying the next URL in the array
+    const handleImageError = useCallback(() => {
+        if (currentLogoIndex < team.logo.length - 1) {
+            setCurrentLogoIndex(prev => prev + 1);
+        } else {
+            // All image URLs failed, now we rely on the last fallback (which should be an emoji)
+            console.warn(`All image sources failed for ${team.name}. Showing emoji fallback.`);
+        }
+    }, [currentLogoIndex, team.logo, team.name]);
+
+    const currentLogoSource = team.logo[currentLogoIndex];
+    // Check if it's a string that does not start with http/https, indicating an emoji or other non-URL fallback
+    const isEmojiFallback = typeof currentLogoSource === 'string' && !currentLogoSource.startsWith('http');
+
 
     return (
         <button
@@ -1270,17 +1474,35 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
                 '--team-secondary': `#${secondaryColor}`,
             }}
         >
-            <div className="text-5xl mb-2 team-logo">
-                {team.logo}
+            {/* Enhanced Logo Display with multiple fallbacks */}
+            <div className="mb-2 team-logo">
+                {!isEmojiFallback ? (
+                    <img 
+                        src={currentLogoSource} 
+                        alt={`${team.name} logo`}
+                        className="w-16 h-16 object-contain"
+                        onError={handleImageError}
+                        onLoad={() => console.log(`✅ Logo loaded for ${team.abbr} from ${currentLogoSource}`)}
+                        style={{
+                            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+                            maxWidth: '64px',
+                            maxHeight: '64px'
+                        }}
+                    />
+                ) : (
+                    <div className="text-5xl w-16 h-16 flex items-center justify-center">
+                        {currentLogoSource} {/* Display emoji fallback */}
+                    </div>
+                )}
             </div>
+                        
             <div className="font-bold text-lg text-text-primary mb-1 team-abbr">
                 {team.abbr}
             </div>
             <div className="text-sm text-text-secondary team-name-full">
                 {team.name}
             </div>
-
-            {/* ✅ ENHANCED Color accent bar with REAL team colors */}
+            {/* Color accent bar */}
             <div
                 className="color-accent"
                 style={{
@@ -1675,6 +1897,8 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const diff = gameTime - now;
 
             if (diff <= 0) {
+                // Removed direct call to setGameStarted, as it belongs to App component
+                // and should be handled by the parent component's logic watching timeLeft.
                 setTimeLeft('Game Started');
                 return;
             }
@@ -1695,7 +1919,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             isActive = false;
             clearInterval(intervalId);
         };
-    }, [gameTime, setTimeLeft]);
+    }, [gameTime, setTimeLeft]); // setTimeLeft is a stable prop from App, gameTime is local state.
 
     if (!gameTime) {
         return (
@@ -1852,7 +2076,7 @@ const App = ({ user }) => {
             const diff = gameTime - now;
             
             if (diff <= 0) {
-                setGameStarted(true);
+                setGameStarted(true); // This state is local to App, correctly set here
                 setTimeLeft('Game Started');
                 return;
             }
@@ -1872,7 +2096,7 @@ const App = ({ user }) => {
         const interval = setInterval(updateTimer, 1000);
         
         return () => clearInterval(interval);
-    }, [todaysMatchup?.startTime]);
+    }, [todaysMatchup?.startTime, setGameStarted, setTimeLeft]); // Added setGameStarted and setTimeLeft to dependencies
 
 
     /**
