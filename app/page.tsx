@@ -227,15 +227,20 @@ const getDisplayName = (user) => {
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
 
+// ========== FIX 1: FORCE CONSISTENT DATE STRING ==========
 /**
- * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
- * IMPORTANT: This now uses UTC date components for global consistency.
- * @returns {string} Date string in 'YYYY-MM-DD' format.
+ * UPDATED: Force exact same date string on all platforms
  */
 const getTodayDateString = () => {
+    // FORCE CONSISTENT DATE - Remove timezone differences
     const now = new Date();
-    // Use UTC date components to ensure consistency across timezones for the "day"
-    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+    const utcYear = now.getUTCFullYear();
+    const utcMonth = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const utcDay = String(now.getUTCDate()).padStart(2, '0');
+    
+    const dateString = `${utcYear}-${utcMonth}-${utcDay}`;
+    console.log('🗓️ UNIFIED DATE STRING:', dateString);
+    return dateString;
 };
 
 /**
@@ -304,49 +309,23 @@ const validateMatchupData = (matchup) => {
     return { isValid: true, gameTime };
 };
 
-// === OPTIONAL: ADD THE UNIVERSAL DATE PARSER TOO ===
-const universalDateParser = (dateInput) => {
+// ========== FIX 3: REMOVE ALL MOBILE DETECTION ==========
+/**
+ * UPDATED: Remove universalDateParser - use standard parsing only
+ */
+const parseDate = (dateInput) => {
     if (!dateInput) return null;
     
-    // If it's already a Date object, return it
-    if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
-    }
-    
-    // Convert to string and clean it
-    let dateString = String(dateInput).trim();
-    
+    // STANDARD PARSING ONLY - No mobile-specific logic
     try {
-        // Method 1: Direct parsing
-        let date = new Date(dateString);
+        const date = new Date(dateInput);
         if (!isNaN(date.getTime())) {
             return date;
         }
-        
-        // Method 2: Fix format
-        if (dateString.includes(' ') && !dateString.includes('T')) {
-            dateString = dateString.replace(' ', 'T');
-            date = new Date(dateString);
-            if (!isNaN(date.getTime())) {
-                return date;
-            }
-        }
-        
-        // Method 3: Force manual parsing if needed
-        const match = dateString.match(/(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
-        if (match) {
-            const [, year, month, day, hour, minute, second] = match;
-            date = new Date(year, month - 1, day, hour, minute, second);
-            if (!isNaN(date.getTime())) {
-                return date;
-            }
-        }
-        
     } catch (error) {
-        console.error('Date parsing error:', error);
+        console.error('Date parsing failed:', error);
     }
     
-    console.error('All parsing methods failed for:', dateInput);
     return null;
 };
 
@@ -1033,46 +1012,40 @@ const validateGameData = (gameData) => {
     return { valid: true };
 };
 
-// CRITICAL: Enhanced daily game selection with deterministic seeding
+// ========== FIX 2: FORCE DETERMINISTIC GAME SELECTION ==========
+/**
+ * UPDATED: Make game selection 100% deterministic across platforms
+ */
 const selectDailyGame = (validGames) => {
     if (validGames.length === 0) {
         throw new Error('No valid games available for today');
     }
 
-    // Sort games by preference (upcoming games first, then by start time)
-    const now = new Date();
-    const sortedGames = validGames.sort((a, b) => {
-        const aTime = new Date(a.startTime);
-        const bTime = new Date(b.startTime);
-        const aFuture = aTime > now;
-        const bFuture = bTime > now;
-        
-        // Prefer future games over past games
-        if (aFuture && !bFuture) return -1;
-        if (!aFuture && bFuture) return 1;
-        
-        // Among future games, prefer closer start times
-        if (aFuture && bFuture) {
-            return aTime - bTime;
-        }
-        
-        // Among past games, prefer more recent ones
-        return bTime - aTime;
+    // FORCE CONSISTENT SORTING - Remove any platform differences
+    const sortedGames = [...validGames].sort((a, b) => {
+        // Sort by start time ONLY for consistency
+        const aTime = new Date(a.startTime).getTime();
+        const bTime = new Date(b.startTime).getTime();
+        return aTime - bTime;
     });
 
-    // Use deterministic selection based on UTC date for global consistency
-    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
-    const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
-    const selectedIndex = seed % sortedGames.length;
-    const selectedGame = sortedGames[selectedIndex];
+    // FORCE DETERMINISTIC SEED - Use EXACT same calculation
+    const todayUTC = getTodayDateString(); // "2025-06-16"
+    const year = parseInt(todayUTC.split('-')[0]); // 2025
+    const month = parseInt(todayUTC.split('-')[1]); // 6
+    const day = parseInt(todayUTC.split('-')[2]); // 16
+    
+    // Simple, consistent seed calculation
+    const seed = (year + month + day) % sortedGames.length;
+    const selectedGame = sortedGames[seed];
 
-    console.log('DAILY GAME SELECTED:', {
-        totalValidGames: validGames.length,
-        selectedIndex,
-        preferredGames: sortedGames.slice(0, 3).map(g => `${g.homeTeam.name} vs ${g.awayTeam.name}`),
+    console.log('🎯 UNIFIED GAME SELECTION:', {
+        totalGames: validGames.length,
+        seed: seed,
+        selectedIndex: seed,
         selected: `${selectedGame.homeTeam.name} vs ${selectedGame.awayTeam.name}`,
-        startTime: new Date(selectedGame.startTime).toLocaleString(),
-        hoursFromNow: Math.round((new Date(selectedGame.startTime) - now) / (1000 * 60 * 60) * 10) / 10
+        startTime: selectedGame.startTime,
+        dateString: todayUTC
     });
 
     return selectedGame;
@@ -1191,28 +1164,25 @@ const getMLBTeamColors = (abbr) => {
     return teamColors[abbr] || ['505050', '808080']; // Default gray colors
 };
 
+// ========== FIX 4: UNIFIED MLB DATA FETCHING ==========
 /**
- * Fetches MLB game data from MLB's official API
- * @param {number} retryCount - Current retry attempt
- * @returns {Promise<Matchup>} Selected daily matchup
+ * UPDATED: Remove mobile-specific timeout/logic
  */
 const fetchMLBData = async (retryCount = 0) => {
     const MAX_RETRIES = 2;
-    const TIMEOUT_MS = 10000;
+    const TIMEOUT_MS = 10000; // Same for all platforms
 
     try {
-        console.log(`MLB API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+        console.log(`⚾ MLB API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-        // Get current date in YYYY-MM-DD format
-        const currentDate = new Date();
-        const dateString = currentDate.toISOString().split('T')[0];
-        
-        // MLB Official API endpoint
+        // FORCE CONSISTENT DATE - Use the unified function
+        const dateString = getTodayDateString();
         const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateString}`;
-        console.log(`Fetching MLB games for ${dateString}: ${apiUrl}`);
+        
+        console.log(`📅 UNIFIED API CALL: ${apiUrl}`);
         
         const response = await fetch(apiUrl, {
             signal: controller.signal,
@@ -1229,19 +1199,17 @@ const fetchMLBData = async (retryCount = 0) => {
         }
         
         const data = await response.json();
-        console.log('MLB API Response received');
+        console.log('✅ MLB API Response received');
         
-        // Check if games exist for today
         if (!data.dates || data.dates.length === 0 || !data.dates[0].games || data.dates[0].games.length === 0) {
             throw new Error(`No MLB games found for ${dateString}`);
         }
         
         const games = data.dates[0].games;
-        console.log(`Found ${games.length} MLB games for ${dateString}`);
+        console.log(`✅ Found ${games.length} MLB games for ${dateString}`);
         
-        // Process games and filter valid ones
+        // Process games - IDENTICAL logic for all platforms
         const allValidGames = [];
-        const rejectedGames = [];
         
         for (const game of games) {
             try {
@@ -1250,94 +1218,72 @@ const fetchMLBData = async (retryCount = 0) => {
                 
                 if (validation.valid) {
                     allValidGames.push(parsedGame);
-                    console.log(`VALID: ${parsedGame.homeTeam.name} vs ${parsedGame.awayTeam.name} at ${new Date(parsedGame.startTime).toLocaleTimeString()}`);
-                } else {
-                    rejectedGames.push({
-                        game: `${game.teams.home.team.abbreviation} vs ${game.teams.away.team.abbreviation}`,
-                        reason: validation.reason,
-                        startTime: game.gameDate
-                    });
-                    console.log(`REJECTED: ${game.teams.home.team.abbreviation} vs ${game.teams.away.team.abbreviation} - ${validation.reason}`);
                 }
             } catch (parseError) {
-                console.warn(`Failed to parse MLB game ${game.gamePk}:`, parseError.message);
-                rejectedGames.push({
-                    game: `Game ${game.gamePk}`,
-                    reason: 'Parse error',
-                    error: parseError.message
-                });
+                console.warn(`Failed to parse game:`, parseError.message);
             }
         }
         
-        console.log(`Valid games: ${allValidGames.length}, Rejected: ${rejectedGames.length}`);
-        
-        if (rejectedGames.length > 0) {
-            console.log('Sample rejected games:', rejectedGames.slice(0, 3));
-        }
+        console.log(`✅ Valid games: ${allValidGames.length}`);
         
         if (allValidGames.length === 0) {
-            throw new Error(`No valid games after processing ${games.length} games. Common rejections: ${rejectedGames.slice(0, 3).map(r => r.reason).join(', ')}`);
+            throw new Error(`No valid games after processing`);
         }
         
-        // Select daily game using existing logic
+        // UNIFIED GAME SELECTION
         return selectDailyGame(allValidGames);
         
     } catch (error) {
-        console.error(`MLB API Error (Attempt ${retryCount + 1}):`, error.message);
+        console.error(`🚨 MLB API Error (Attempt ${retryCount + 1}):`, error.message);
         
         if (retryCount < MAX_RETRIES) {
             const delayMs = Math.pow(2, retryCount) * 1000;
-            console.log(`Retrying in ${delayMs}ms...`);
+            console.log(`⏰ Retrying in ${delayMs}ms...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
             return fetchMLBData(retryCount + 1);
         }
         
-        console.error('MLB API COMPLETELY FAILED - Using emergency fallback');
         throw error;
     }
 };
 
 
+// ========== FIX 5: UNIFIED SEASONAL SIMULATION ==========
 /**
- * Enhanced simulation that respects current sport season
- * @param {Date} date - Date for simulation
- * @returns {Matchup} Simulated matchup for current season
-*/
+ * UPDATED: Remove mobile-specific logic from simulation
+ */
 const generateSeasonalSimulation = (date) => {
     const currentSport = getCurrentSport();
     const sportEmoji = getSportEmoji(currentSport);
 
-    // Filter matchup pool by current sport
     const seasonalMatchups = matchupPool.filter(m => m.sport === currentSport);
-
-    // If no matchups for current sport, use all matchups
     const availableMatchups = seasonalMatchups.length > 0 ? seasonalMatchups : matchupPool;
 
-    // Use UTC date as seed for consistent daily matchups globally
-    const todayUTC = getTodayDateString(); // This now returns YYYY-MM-DD in UTC
-    const seed = todayUTC.split('-').reduce((acc, part) => acc + parseInt(part), 0);
-    const dailyMatchupIndex = seed % availableMatchups.length;
-    const selectedMatchup = availableMatchups[dailyMatchupIndex];
-
-    // Add dynamic game time respecting validation rules
-    const now = new Date();
-    let gameTime = new Date(now.getTime() + GAME_VALIDATION_RULES.MIN_HOURS_FUTURE * 60 * 60 * 1000 + (seed % 2) * 60 * 60 * 1000); // Start at least MIN_HOURS_FUTURE, add up to 2 hours
+    // FORCE SAME SEED CALCULATION as selectDailyGame
+    const todayUTC = getTodayDateString();
+    const year = parseInt(todayUTC.split('-')[0]);
+    const month = parseInt(todayUTC.split('-')[1]);
+    const day = parseInt(todayUTC.split('-')[2]);
+    const seed = (year + month + day) % availableMatchups.length;
     
-    // Adjust hour to be within MIN_HOUR_OF_DAY and MAX_HOUR_OF_DAY
-    let targetHour = gameTime.getHours();
-    if (targetHour < GAME_VALIDATION_RULES.MIN_HOUR_OF_DAY) {
-        gameTime.setHours(GAME_VALIDATION_RULES.MIN_HOUR_OF_DAY + (seed % 3)); // Randomize a bit within valid morning hours
-    } else if (targetHour > GAME_VALIDATION_RULES.MAX_HOUR_OF_DAY) {
-        gameTime.setDate(gameTime.getDate() + 1); // Move to next day
-        gameTime.setHours(GAME_VALIDATION_RULES.MIN_HOUR_OF_DAY + (seed % 3));
-    }
+    const selectedMatchup = availableMatchups[seed];
+
+    // CONSISTENT GAME TIME - 2 hours from now for all platforms
+    const gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    console.log('🎮 UNIFIED SIMULATION:', {
+        sport: currentSport,
+        seed: seed,
+        selected: `${selectedMatchup.homeTeam.name} vs ${selectedMatchup.awayTeam.name}`,
+        gameTime: gameTime.toISOString()
+    });
 
     return {
         ...selectedMatchup,
-        sport: currentSport, // Override with current season sport
+        sport: currentSport,
         homeTeam: { ...selectedMatchup.homeTeam, logo: sportEmoji },
         awayTeam: { ...selectedMatchup.awayTeam, logo: sportEmoji },
-        startTime: gameTime.toISOString(), // Store as ISO string
+        startTime: gameTime.toISOString(),
         status: 'upcoming'
     };
 };
@@ -2167,14 +2113,13 @@ const EmergencyFallback = () => (
     </div>
 );
 
-// ========== GAMETIMEDISPLAY WITH ENHANCED DEBUGGING ==========
+// ========== FIX 6: REMOVE MOBILE-SPECIFIC TIMER LOGIC ==========
 /**
- * Enhanced GameTimeDisplay with detailed mobile debugging
+ * UPDATED: Simple timer that works identically everywhere
  */
 const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
-    const [debugInfo, setDebugInfo] = useState({});
 
     useEffect(() => {
         if (!startTime) {
@@ -2183,49 +2128,24 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             return;
         }
 
-        // Enhanced date parsing with debugging
-        let parsedTime = null;
-        const debugSteps = [];
-
-        try {
-            if (startTime instanceof Date) {
-                parsedTime = startTime;
-                debugSteps.push('Used existing Date object');
-            } else {
-                parsedTime = new Date(startTime);
-                debugSteps.push(`Parsed "${startTime}" to Date`);
-            }
-
-            if (isNaN(parsedTime.getTime())) {
-                throw new Error('Invalid date result');
-            }
-
-            debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
-            debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
-            
-            setGameTime(parsedTime);
-            setError(null);
-            setDebugInfo({ steps: debugSteps, success: true });
-            
-
-        } catch (parseError) {
-            console.error('Date parsing failed:', parseError);
+        // SIMPLE PARSING - No mobile-specific logic
+        const parsedTime = parseDate(startTime);
+        
+        if (!parsedTime) {
             const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
             setGameTime(fallbackTime);
-            setError(`Parse failed: ${parseError.message}`);
-            setDebugInfo({ steps: debugSteps, error: parseError.message });
+            setError('Using fallback time');
+        } else {
+            setGameTime(parsedTime);
+            setError(null);
         }
     }, [startTime, matchupId]);
 
-    // Enhanced timer logic with debugging
+    // SIMPLE TIMER - Same logic for all platforms
     useEffect(() => {
         if (!gameTime) return;
 
-        let isActive = true;
-
         const updateTimer = () => {
-            if (!isActive) return;
-
             const now = new Date();
             const diff = gameTime - now;
 
@@ -2238,18 +2158,12 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
             
-            const timeString = `${hours}h ${minutes}m ${seconds}s`;
-            setTimeLeft(timeString);
-            
+            setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
         };
 
-        updateTimer(); // Initial call
+        updateTimer();
         const intervalId = setInterval(updateTimer, 1000);
-
-        return () => {
-            isActive = false;
-            clearInterval(intervalId);
-        };
+        return () => clearInterval(intervalId);
     }, [gameTime, setTimeLeft]);
 
     if (!gameTime) {
@@ -2278,6 +2192,23 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             )}
         </div>
     );
+};
+
+// ========== FIX 7: DEBUGGING TO VERIFY CONSISTENCY ==========
+/**
+ * Add this temporarily to verify same game on both platforms
+ */
+const logGameSelection = (matchup, platform = 'unknown') => {
+    console.log(`🔍 [${platform.toUpperCase()}] FINAL GAME SELECTION:`, {
+        platform: platform,
+        gameId: matchup.id,
+        homeTeam: matchup.homeTeam.name,
+        awayTeam: matchup.awayTeam.name,
+        venue: matchup.venue,
+        startTime: matchup.startTime,
+        userAgent: navigator.userAgent.substring(0, 50) + '...',
+        timestamp: new Date().toISOString()
+    });
 };
 
 
@@ -2348,44 +2279,47 @@ const App = ({ user }) => {
 
     // Load today's matchup (real or simulated)
     useEffect(() => {
-    const loadTodaysMatchup = async () => {
-        setMatchupLoading(true);
-        let matchup = null;
-        
-        try {
-            const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
+        const loadTodaysMatchup = async () => {
+            setMatchupLoading(true);
+            let matchup = null;
             
-            if (needsNewMatchup) {
-                matchup = await generateEnhancedDailyMatchup(new Date());
-            } else {
-                matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
+            try {
+                const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
+                
+                if (needsNewMatchup) {
+                    matchup = await generateEnhancedDailyMatchup(new Date());
+                } else {
+                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
+                }
+                
+                console.log('✅ Successfully loaded matchup:', matchup.homeTeam.name, 'vs', matchup.awayTeam.name);
+                
+            } catch (error) {
+                console.error('❌ Matchup loading failed, using emergency fallback:', error);
+                
+                // Emergency fallback
+                matchup = {
+                    id: 'emergency-game',
+                    homeTeam: { name: 'Athletics', abbr: 'OAK', logo: '⚾', colors: ['00843D', 'EFB21E'] },
+                    awayTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
+                    sport: 'MLB',
+                    venue: 'Oakland Coliseum',
+                    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+                    status: 'upcoming'
+                };
             }
             
-            console.log('✅ Successfully loaded matchup:', matchup.homeTeam.name, 'vs', matchup.awayTeam.name);
-            
-        } catch (error) {
-            console.error('❌ Matchup loading failed, using emergency fallback:', error);
-            
-            // Emergency fallback
-            matchup = {
-                id: 'emergency-game',
-                homeTeam: { name: 'Athletics', abbr: 'OAK', logo: '⚾', colors: ['00843D', 'EFB21E'] },
-                awayTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
-                sport: 'MLB',
-                venue: 'Oakland Coliseum',
-                startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-                status: 'upcoming'
-            };
-        }
-        
-        // Always set a matchup (either real or emergency)
-        setTodaysMatchup(matchup);
-        setMatchupLoading(false);
-        setIsInitialized(true);
-    };
+            // Always set a matchup (either real or emergency)
+            setTodaysMatchup(matchup);
+            // Verification log
+            logGameSelection(matchup, /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop');
 
-    loadTodaysMatchup();
-}, [today, userState.lastPickDate]);
+            setMatchupLoading(false);
+            setIsInitialized(true);
+        };
+
+        loadTodaysMatchup();
+    }, [today, userState.lastPickDate]);
 
 
     // Determine if user has picked today (only if todaysMatchup is available)
