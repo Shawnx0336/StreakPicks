@@ -315,8 +315,14 @@ const getMLBTeamColors = (abbr) => {
  */
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
+    console.log('📱 Platform Info:', {
+        userAgent: navigator.userAgent.substring(0, 50),
+        platform: navigator.platform,
+        today: getTodayDateString(),
+        timestamp: new Date().toISOString()
+    });
     
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = getTodayDateString(); // Use your existing UTC function
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
     
     console.log('📡 Fetching from:', apiUrl);
@@ -474,20 +480,25 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
             const item = window.localStorage.getItem(storageKey);
             let parsedItem = item ? JSON.parse(item) : initialValue;
 
-            const todayString = getTodayDateString(); // Use the new reliable date string
-            const currentWeekMonday = getMondayOfCurrentWeek();
-
             // Handle date-based resets for userState only
             if (keyPrefix === 'streakPickemUser') {
                 let updatedParsedItem = { ...parsedItem };
+                
+                // FORCE consistent date comparison
+                const currentDate = getTodayDateString();
+                const storedDate = updatedParsedItem.lastPickDate;
+                
+                console.log('Date comparison:', { currentDate, storedDate, different: storedDate !== currentDate });
 
                 // Reset todaysPick and update lastPickDate if it's a new day
-                if (updatedParsedItem.lastPickDate !== todayString) {
+                if (storedDate !== currentDate) {
+                    console.log('🔄 Resetting picks for new day');
                     updatedParsedItem.todaysPick = null;
-                    updatedParsedItem.lastPickDate = todayString;
+                    updatedParsedItem.lastPickDate = currentDate;
                 }
 
                 // Reset weekly stats if it's a new week
+                const currentWeekMonday = getMondayOfCurrentWeek();
                 if (!updatedParsedItem.weeklyStats || updatedParsedItem.weeklyStats.weekStart !== currentWeekMonday) {
                     updatedParsedItem.weeklyStats = {
                         picks: 0,
@@ -1526,18 +1537,11 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
         const debugSteps = [];
 
         try {
-            if (startTime instanceof Date) {
-                parsedTime = startTime;
-                debugSteps.push('Used existing Date object');
-            } else {
-                parsedTime = new Date(startTime);
-                debugSteps.push(`Parsed "${startTime}" to Date`);
-            }
-
+            parsedTime = new Date(startTime);
             if (isNaN(parsedTime.getTime())) {
-                throw new Error('Invalid date result');
+                throw new Error('Invalid date');
             }
-
+            debugSteps.push(`Parsed "${startTime}" to Date`);
             debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
             debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
             
@@ -1547,7 +1551,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             
 
         } catch (parseError) {
-            console.error('Date parsing failed:', parseError);
+            console.error('Timer: Date parsing failed:', parseError);
             const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
             setGameTime(fallbackTime);
             setError(`Parse failed: ${parseError.message}`);
@@ -1719,10 +1723,16 @@ const App = ({ user }) => {
             return;
         }
         
-        const gameTime = new Date(todaysMatchup.startTime);
-        
-        if (isNaN(gameTime.getTime())) {
-            setTimeLeft('Invalid time');
+        // FORCE consistent parsing
+        let gameTime;
+        try {
+            gameTime = new Date(todaysMatchup.startTime);
+            if (isNaN(gameTime.getTime())) {
+                throw new Error('Invalid date');
+            }
+        } catch (error) {
+            console.error('Timer: Date parsing failed:', error);
+            setTimeLeft('Invalid game time');
             return;
         }
         
@@ -2036,6 +2046,26 @@ const App = ({ user }) => {
         updateLeaderboard
     ]);
 
+    // Add this to your App component for testing
+    const debugPlatform = () => {
+        console.log('🔍 PLATFORM DEBUG:', {
+            todayDateString: getTodayDateString(),
+            currentDate: new Date().toISOString().split('T')[0],
+            userAgent: navigator.userAgent.substring(0, 50),
+            platform: navigator.platform,
+            gameLoaded: !!todaysMatchup,
+            gameId: todaysMatchup?.id,
+            gameTeams: todaysMatchup ? `${todaysMatchup.homeTeam.abbr} vs ${todaysMatchup.awayTeam.abbr}` : 'none'
+        });
+    };
+
+    // Call this in useEffect after game loads:
+    useEffect(() => {
+        if (todaysMatchup) {
+            debugPlatform();
+        }
+    }, [todaysMatchup]);
+
 
     // Simple loading check - no complex logic
     if (matchupLoading) {
@@ -2108,8 +2138,11 @@ const App = ({ user }) => {
                 </style>
                 <div className="text-center p-6">
                     <h2 className="text-2xl font-bold mb-4">No Games Available</h2>
-                    <p className="text-text-secondary mb-6">
-                        No MLB games found for today. This could mean it's an off-day or there's an API issue.
+                    <p className="text-text-secondary mb-4">
+                        No MLB games found for {getTodayDateString()}
+                    </p>
+                    <p className="text-xs text-text-secondary mb-6">
+                        Platform: {navigator.platform} | Time: {new Date().toLocaleString()}
                     </p>
                     <button
                         onClick={() => window.location.reload()}
