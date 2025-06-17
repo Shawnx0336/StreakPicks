@@ -32,6 +32,15 @@
     --accent-win: #22c55e; /* Bright green for correct picks/wins */
     --accent-loss: #ef4444; /* Bright red for wrong picks/losses */
 
+    /* Additional Color Variables for Consistency */
+    --info: #3b82f6;
+    --info-light: #93c5fd;
+    --success: #10b981;
+    --success-light: #6ee7b7;
+    --error: #ef4444;
+    --error-light: #fca5a5;
+    --warning: #f59e0b;
+
     /* Typography */
     --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
     --font-mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
@@ -74,20 +83,18 @@
     --text-secondary: #a0a0a0;
 }
 
-/* Base body styles from user request */
+/* Base body styles */
 body {
-    background: var(--bg-primary); /* Use CSS variable for background */
-    color: var(--text-primary);    /* Use CSS variable for text color */
-    font-family: var(--font-primary); /* Use CSS variable for font family */
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-primary);
     margin: 0;
     padding: 0;
-    overflow-x: hidden; /* Prevent horizontal scroll */
-    transition: background var(--transition-normal), color var(--transition-normal); /* Smooth theme transition */
+    overflow-x: hidden;
+    transition: background var(--transition-normal), color var(--transition-normal);
 }
 
-/* --- Component-specific styles (can be integrated here or in components layer if desired) --- */
-
-/* Animations */
+/* --- ENHANCED ANIMATIONS --- */
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
@@ -103,20 +110,57 @@ body {
     to { transform: translateX(0); opacity: 1; }
 }
 
-/* Applied to elements needing these animations */
+@keyframes team-select {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1.02); }
+}
+
+@keyframes celebrate {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+@keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes pulse-success {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 40%, transparent); }
+    70% { box-shadow: 0 0 0 10px transparent; }
+}
+
+@keyframes pulse-gold {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
+    70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
+}
+
+@keyframes colorPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Applied animation classes */
 .animate-fadeInUp { animation: fadeInUp 0.5s ease-out forwards; }
 .animate-slideInRight { animation: slideInRight 0.5s ease-out forwards; }
 
-/* Matchup Card Styling */
+/* --- PREMIUM MATCHUP CARD STYLING --- */
 .matchup-card {
     background: linear-gradient(135deg,
         var(--bg-secondary) 0%,
-        color-mix(in srgb, var(--accent-info) 5%, var(--bg-secondary)) 100%
+        color-mix(in srgb, var(--accent-info) 8%, var(--bg-secondary)) 50%,
+        var(--bg-secondary) 100%
     );
     border: 1px solid color-mix(in srgb, var(--accent-info) 10%, transparent);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(20px); /* Frosted glass effect */
+    backdrop-filter: blur(20px);
     position: relative;
     overflow: hidden;
     transition: all var(--transition-normal);
@@ -133,29 +177,31 @@ body {
     opacity: 0.6;
 }
 
-/* Team Selection Container */
+/* --- TEAM SELECTION CONTAINER --- */
 .team-selection-container {
     display: grid;
-    grid-template-columns: 1fr 60px 1fr; /* Two team cards and a VS divider */
+    grid-template-columns: 1fr 60px 1fr;
     gap: var(--space-lg);
     align-items: stretch;
     width: 100%;
-    max-width: 400px; /* Constrain width for better mobile experience */
+    max-width: 400px;
     margin: 0 auto;
     padding: var(--space-lg);
 }
 
-/* Individual Team Card */
+/* --- ENHANCED TEAM CARD STYLING --- */
 .team-card {
-    min-height: 160px; /* Ensure consistent height */
+    /* Critical dimensions for symmetry */
+    min-height: 160px;
     width: 100%;
-    aspect-ratio: 3/4; /* Maintain consistent proportions */
+    aspect-ratio: 3/4;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: var(--space-sm);
 
+    /* Visual design */
     background: var(--bg-secondary);
     border: 2px solid var(--bg-tertiary);
     border-radius: var(--radius-xl);
@@ -163,23 +209,24 @@ body {
     position: relative;
     overflow: hidden;
 
+    /* Interactions */
     cursor: pointer;
-    transition: all var(--transition-normal);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     transform: scale(1);
-    outline: none; /* Remove default outline */
+    outline: none;
 }
 
 .team-card:focus-visible {
-    box-shadow: 0 0 0 2px var(--accent-info), 0 0 0 4px var(--accent-info); /* Accessibility highlight */
+    box-shadow: 0 0 0 2px var(--accent-info), 0 0 0 4px color-mix(in srgb, var(--accent-info) 30%, transparent);
     outline: none;
 }
 
 .team-card:hover:not(.disabled) {
-    transform: translateY(-2px) scale(1.02);
-    border-color: var(--team-primary); /* Uses custom property from JS */
-    box-shadow:
+    transform: translateY(-4px) scale(1.03);
+    border-color: var(--team-primary);
+    box-shadow: 
         var(--shadow-xl),
-        0 0 20px color-mix(in srgb, var(--team-primary) 30%, transparent);
+        0 0 30px color-mix(in srgb, var(--team-primary) 30%, transparent);
 }
 
 .team-card.selected {
@@ -189,38 +236,49 @@ body {
         var(--bg-secondary)
     );
     transform: scale(1.02);
-    animation: team-select 0.3s ease-out; /* Apply animation on selection */
+    animation: team-select 0.3s ease-out;
 }
 
 .team-card.disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    transform: none; /* Remove hover transform when disabled */
+    transform: none;
 }
 
 .team-card .team-logo {
-    font-size: 3.5rem; /* Adjusted for better fit on card */
+    font-size: 3.5rem;
 }
 
 .team-card .team-name {
-    font-size: 1.125rem; /* Equivalent to text-lg */
-    font-weight: 700;    /* Equivalent to font-bold */
+    font-size: 1.125rem;
+    font-weight: 700;
 }
 
 .team-card .team-name-full {
-    font-size: 0.875rem; /* Equivalent to text-sm */
+    font-size: 0.875rem;
     color: var(--text-secondary);
 }
 
+/* Enhanced color accent bar with team colors */
 .team-card .color-accent {
     position: absolute;
     bottom: 0;
     left: 0;
-    width: 100%;
-    height: 6px; /* Accent bar height */
-    opacity: 0.7;
+    right: 0;
+    height: 4px;
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    transition: height 0.3s ease;
 }
 
+.team-card:hover .color-accent {
+    height: 6px;
+}
+
+.team-card.selected .color-accent {
+    animation: colorPulse 2s ease-in-out infinite;
+}
+
+/* --- VS DIVIDER --- */
 .vs-divider {
     display: flex;
     align-items: center;
@@ -230,40 +288,43 @@ body {
     color: var(--text-secondary);
     background: var(--bg-tertiary);
     border-radius: 50%;
-    width: 60px; /* Fixed size for circle */
-    height: 60px; /* Fixed size for circle */
+    width: 60px;
+    height: 60px;
     box-shadow: var(--shadow-md);
-    flex-shrink: 0; /* Prevent shrinking in flex container */
+    flex-shrink: 0;
 }
 
-/* Animations for Team Cards */
-@keyframes team-select {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1.02); }
+/* --- STREAK DISPLAY ANIMATIONS --- */
+.streak-display-container {
+    text-align: center;
 }
 
-/* Streak Display Animations */
-@keyframes celebrate {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-}
-
-@keyframes flicker {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
+.streak-number {
+    font-size: 4rem;
+    font-weight: 800;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.5s ease;
+    color: var(--text-primary);
 }
 
 .streak-number.celebrating {
     animation: celebrate 1s ease-in-out;
-    color: var(--accent-win); /* Highlight color when celebrating */
+    color: var(--accent-win);
 }
 
 .streak-flame {
     animation: flicker 1.5s infinite;
 }
 
-/* Leaderboard Modal Styles */
+.streak-celebration {
+    animation: pulse-success 2s infinite;
+}
+
+/* --- LEADERBOARD MODAL STYLES --- */
 .leaderboard-modal {
     position: fixed;
     inset: 0;
@@ -281,10 +342,10 @@ body {
     border-radius: var(--radius-2xl);
     max-width: 500px;
     width: 100%;
-    max-height: 90vh; /* Adjusted for better fit on smaller screens */
+    max-height: 90vh;
     overflow-y: auto;
     border: 2px solid var(--bg-tertiary);
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5); /* Stronger shadow */
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
 }
 
 .leaderboard-tabs {
@@ -301,7 +362,7 @@ body {
     cursor: pointer;
     transition: all var(--transition-fast);
     color: var(--text-secondary);
-    font-weight: 600; /* font-semibold */
+    font-weight: 600;
 }
 
 .leaderboard-tab:hover {
@@ -311,16 +372,16 @@ body {
 .leaderboard-tab.active {
     background: var(--accent-info);
     color: white;
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0; /* Rounded corners for active tab */
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 }
 
 .leaderboard-tab:first-child.active {
     border-top-left-radius: var(--radius-xl);
 }
+
 .leaderboard-tab:last-child.active {
     border-top-right-radius: var(--radius-xl);
 }
-
 
 .leaderboard-entry {
     display: flex;
@@ -339,17 +400,17 @@ body {
 }
 
 .leaderboard-entry.current-user {
-    background: color-mix(in srgb, var(--accent-info) 20%, transparent); /* Lighter background for current user */
+    background: color-mix(in srgb, var(--accent-info) 20%, transparent);
     border-left: 4px solid var(--accent-info);
 }
 
-/* Rank Badge Styles */
+/* --- RANK BADGE STYLES --- */
 .rank-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: var(--space-xs) var(--space-sm);
-    border-radius: 20px; /* Pill shape */
+    border-radius: 20px;
     font-weight: bold;
     font-size: 0.875rem;
     color: var(--text-primary);
@@ -359,37 +420,43 @@ body {
 }
 
 .rank-badge.top-10 {
-    background: linear-gradient(135deg, #FFD700, #FFA500); /* Gold */
-    color: #1a1a1a; /* Dark text on gold */
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    color: #1a1a1a;
     animation: pulse-gold 2s infinite;
 }
 
 .rank-badge.top-50 {
-    background: linear-gradient(135deg, #C0C0C0, #A0A0A0); /* Silver */
+    background: linear-gradient(135deg, #C0C0C0, #A0A0A0);
     color: #1a1a1a;
 }
 
 .rank-badge.top-100 {
-    background: linear-gradient(135deg, #CD7F32, #8B4513); /* Bronze */
+    background: linear-gradient(135deg, #CD7F32, #8B4513);
     color: #fff;
 }
+
 .rank-badge.standard {
     background: var(--bg-tertiary);
     color: var(--text-primary);
 }
 
-@keyframes pulse-gold {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
-    70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
-}
-
-/* Loading Spinner */
+/* --- LOADING SPINNER --- */
 .loader {
     border-top-color: var(--accent-info);
     animation: spin 1.2s linear infinite;
 }
 
-/* Share Modal Styles */
+.loading-shimmer {
+    background: linear-gradient(90deg, 
+        transparent, 
+        color-mix(in srgb, var(--bg-tertiary) 50%, transparent), 
+        transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+/* --- SHARE MODAL STYLES --- */
 .share-modal-container {
     position: fixed;
     inset: 0;
@@ -412,25 +479,35 @@ body {
     border: 2px solid var(--bg-tertiary);
 }
 
-/* Mobile Optimizations */
+/* --- GAME TIME DISPLAY --- */
+.game-time-display {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.timer-text {
+    color: var(--text-secondary);
+}
+
+/* --- MOBILE OPTIMIZATIONS --- */
 @media (max-width: 640px) {
     .team-selection-container {
-        grid-template-columns: 1fr 50px 1fr; /* Adjust for smaller screen */
+        grid-template-columns: 1fr 50px 1fr;
         gap: var(--space-md);
         padding: var(--space-md);
     }
 
     .team-card {
-        min-height: 140px; /* Smaller cards on mobile */
+        min-height: 140px;
         padding: var(--space-md);
     }
 
     .team-card .team-logo {
-        font-size: 3rem; /* Smaller logo */
+        font-size: 3rem;
     }
 
     .team-card .team-name {
-        font-size: 1rem; /* Smaller text */
+        font-size: 1rem;
     }
 
     .vs-divider {
@@ -450,5 +527,22 @@ body {
 
     .leaderboard-entry span {
         font-size: 0.875rem;
+    }
+    
+    .streak-number {
+        font-size: 3rem;
+    }
+}
+
+/* --- SETTINGS GRID --- */
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm);
+}
+
+@media (max-width: 480px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
     }
 }
