@@ -4,11 +4,11 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
-// Firebase imports - ADD THESE
+// Firebase imports
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, onValue, push, serverTimestamp, off } from 'firebase/database';
 
-// Firebase configuration - USE THIS EXACT CONFIG
+// Firebase configuration (USE THIS EXACT CONFIG)
 const firebaseConfig = {
   apiKey: "AIzaSyDV6qrKInWWQ-w81p6TiZqwEw3kYEBTpR8",
   authDomain: "streakpicks-2a21a.firebaseapp.com",
@@ -42,7 +42,6 @@ const useWhop = () => {
 
         const checkAuthStatus = async () => {
             try {
-                // Check if user is authenticated by looking for auth cookie
                 const response = await fetch('/api/auth/check', {
                     method: 'GET',
                     credentials: 'include',
@@ -58,13 +57,11 @@ const useWhop = () => {
                     setHasAccess(true);
                     setError(null);
                 } else if (response.status === 401) {
-                    // User not authenticated
                     setUser(null);
                     setIsAuthenticated(false);
                     setHasAccess(false);
                     setError(null);
                 } else {
-                    // Other error
                     throw new Error(`Authentication check failed: ${response.status}`);
                 }
             } catch (err) {
@@ -74,14 +71,13 @@ const useWhop = () => {
                 setIsAuthenticated(false);
                 setHasAccess(false);
             } finally {
-                setLoading(false); // Set loading to false once check is complete
+                setLoading(false);
             }
         };
 
         checkAuthStatus();
     }, [isClient]);
 
-    // Show loading until client-side hydration is complete
     if (!isClient) {
         return { user: null, isAuthenticated: false, isLoading: true, hasAccess: false, error: null };
     }
@@ -108,7 +104,7 @@ const useWhop = () => {
  * @property {number} bestStreak - All-time best consecutive correct picks.
  * @property {number} totalPicks - Total picks made.
  * @property {number} correctPicks - Total correct picks.
- * @property {Object | null} todaysPick - Details of today's pick: { matchupId, selectedTeam, timestamp, date }."
+ * @property {Object | null} todaysPick - Details of today's pick: { matchupId, selectedTeam, timestamp, date }.
  * @property {string | null} lastPickDate - `toDateString()` of the last date a pick was made.
  * @property {Theme} theme - Current UI theme ('dark' or 'light').
  * @property {boolean} soundEnabled - Is sound enabled?
@@ -119,6 +115,7 @@ const useWhop = () => {
 
 /**
  * @typedef {Object} Team
+ *
  * @property {string} name - Full team name.
  * @property {string} abbr - Team abbreviation.
  * @property {string} logo - Emoji logo for the sport.
@@ -133,7 +130,7 @@ const useWhop = () => {
  * @property {string} sport - Sport type (e.e., 'NBA', 'NFL', 'MLB', 'NHL', 'Soccer', 'NCAAB').
  * @property {string} venue - Venue name.
  * @property {string} startTime - Matchup start time (ISO string).
- * @property {string} status - Current status of the matchup (e.g., 'upcoming').
+ * @property {string} status - Current status of the matchup (e.e., 'upcoming').
  */
 
 /**
@@ -175,7 +172,7 @@ const useWhop = () => {
  */
 const simpleHash = (str) => {
     let hash = 0;
-    if (str === null || str === undefined) { // Handle null or undefined string input
+    if (str === null || str === undefined) {
         str = '';
     }
     for (let i = 0; i < str.length; i++) {
@@ -184,24 +181,6 @@ const simpleHash = (str) => {
         hash |= 0; // Convert to 32bit integer
     }
     return Math.abs(hash);
-};
-
-/**
- * Generates an anonymous but consistent display name based on userId.
- * @param {string} userId - The user's unique ID.
- * @returns {string} Generated display name.
- */
-const generateDisplayName = (userId) => {
-    const adjectives = ['Fire', 'Ice', 'Lightning', 'Storm', 'Steel', 'Shadow', 'Blazing', 'Mighty', 'Swift', 'Golden', 'Mystic', 'Crimson', 'Azure', 'Jade', 'Silver', 'Bronze', 'Diamond', 'Emerald', 'Vapor', 'Echo'];
-    const nouns = ['Picker', 'Prophet', 'Analyst', 'Streak', 'Eagle', 'Tiger', 'Champion', 'Master', 'Wizard', 'Legend', 'Striker', 'Scout', 'Oracle', 'Hunter', 'Guardian', 'Titan', 'Specter', 'Vanguard', 'Pioneer', 'Maverick'];
-
-    // Use userId hash to ensure consistent name
-    const hashVal = simpleHash(userId);
-    const adjIndex = hashVal % adjectives.length;
-    const nounIndex = Math.floor(hashVal / adjectives.length) % nouns.length;
-    const number = (Math.floor(hashVal / (adjectives.length * nouns.length)) % 999) + 1; // 1 to 999
-
-    return `${adjectives[adjIndex]}${nouns[nounIndex]}${number}`;
 };
 
 /**
@@ -226,28 +205,6 @@ const getDisplayName = (user) => {
     // Always use Whop account information
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
-
-/**
- * Checks if a Date object is valid.
- * @param {Date} date - The Date object to check.
- * @returns {boolean} True if the date is valid, false otherwise.
- */
-const isValidDate = (date) => {
-    return date instanceof Date && !isNaN(date.getTime());
-};
-
-/**
- * Safely parses a date input into a Date object, returning null if invalid.
- * @param {*} dateInput - The input to parse (e.g., string, number, Date object).
- * @returns {Date | null} A valid Date object or null.
- */
-const safeParseDate = (dateInput) => {
-    if (!dateInput) return null;
-    
-    const date = new Date(dateInput);
-    return isValidDate(date) ? date : null;
-};
-
 
 // MLB Team Colors
 const getMLBTeamColors = (abbr) => {
@@ -304,9 +261,8 @@ const getMLBTeamColors = (abbr) => {
  */
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
-    // Removed platform-specific logging details as per "no platform detection" rule
     
-    // ✅ CRITICAL FIX: Use local date, not UTC for API query
+    // Use local date for API query
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -327,8 +283,6 @@ const getTodaysMLBGame = async () => {
         const response = await fetch(apiUrl, {
             headers: {
                 'Accept': 'application/json',
-                // Removed 'User-Agent' header to let the browser send its default.
-                // This improves universality and avoids potential API rejections.
             }
         });
         
@@ -372,9 +326,8 @@ const getTodaysMLBGame = async () => {
         };
         
     } catch (error) {
-        // Log the full error object for better debugging
         console.error('❌ MLB API FAILED:', error); 
-        throw error; // DON'T CATCH - LET IT FAIL
+        throw error;
     }
 };
 
@@ -1524,7 +1477,7 @@ const ErrorDisplay = ({ message }) => (
 /**
  * Enhanced GameTimeDisplay with detailed mobile debugging
  */
-const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
+const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId, setGameStarted }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
     // Removed debugInfo state as platform-specific info is no longer desired in logs
@@ -1579,6 +1532,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const diff = gameTime - now;
 
             if (diff <= 0) {
+                setGameStarted(true); // Now correctly uses the prop
                 setTimeLeft('Game Started');
                 return;
             }
@@ -1599,7 +1553,7 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             isActive = false;
             clearInterval(intervalId);
         };
-    }, [gameTime, setTimeLeft]);
+    }, [gameTime, setTimeLeft, setGameStarted]); // Added setGameStarted to dependencies
 
     if (!gameTime) {
         return (
@@ -1639,14 +1593,43 @@ const App = ({ user }) => {
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     
     // Share analytics state
-    const [shareStats, setShareStats] = useLocalStorage('shareStats', {
-        totalShares: 0,
-        sharesByType: {},
-        sharesByPlatform: {},
-        lastShared: null
-    }, userId); 
+    // Converted to use useState with direct localStorage read/write for simplification.
+    const [shareStats, setShareStats] = useState(() => {
+        if (typeof window === 'undefined') return { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
+        try {
+            const stored = window.localStorage.getItem(`shareStats_${userId}`);
+            return stored ? JSON.parse(stored) : { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
+        } catch (error) {
+            console.error('Error reading shareStats from localStorage:', error);
+            return { totalShares: 0, sharesByType: {}, sharesByPlatform: {}, lastShared: null };
+        }
+    });
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(`shareStats_${userId}`, JSON.stringify(shareStats));
+        }
+    }, [shareStats, userId]);
+
     // Game results history storage
-    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
+    // Converted to use useState with direct localStorage read/write for simplification.
+    const [gameResults, setGameResults] = useState(() => {
+        if (typeof window === 'undefined') return [];
+        try {
+            const stored = window.localStorage.getItem(`gameResults_${userId}`);
+            return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Error reading gameResults from localStorage:', error);
+            return [];
+        }
+    });
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(`gameResults_${userId}`, JSON.stringify(gameResults));
+        }
+    }, [gameResults, userId]);
+
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -1771,7 +1754,7 @@ const App = ({ user }) => {
         const interval = setInterval(updateTimer, 1000);
         
         return () => clearInterval(interval);
-    }, [todaysMatchup?.startTime]);
+    }, [todaysMatchup?.startTime, setTimeLeft, setGameStarted]);
 
 
     /**
@@ -2313,6 +2296,9 @@ const App = ({ user }) => {
                     
                     /* Accessibility */
                     outline: none;
+
+                    /* Subtle inner shadow for depth */
+                    box-shadow: var(--shadow-md), inset 0 1px 3px 0 rgba(0,0,0,0.05);
                 }
 
                 .team-card:focus-visible {
@@ -2331,11 +2317,13 @@ const App = ({ user }) => {
 
                 .team-card.selected {
                     border-color: var(--team-primary);
+                    border-width: 3px; /* Thicker border on selection */
                     background: linear-gradient(135deg, 
-                        var(--team-primary)10, 
+                        var(--team-primary)20, /* More prominent primary color in background */
                         var(--bg-secondary)
                     );
                     transform: scale(1.02);
+                    box-shadow: var(--shadow-lg), 0 0 15px var(--team-primary)60; /* Stronger glow when selected */
                 }
 
                 .team-card.disabled {
@@ -2423,194 +2411,6 @@ const App = ({ user }) => {
                     }
                 }
 
-                /* LOADING STATES */
-                .loading-shimmer {
-                    background: linear-gradient(90deg, 
-                        transparent, 
-                        color-mix(in srgb, var(--bg-tertiary) 50%, transparent), 
-                        transparent
-                    );
-                    background-size: 200% 100%;
-                    animation: shimmer 1.5s infinite;
-                }
-
-                @keyframes shimmer {
-                    0% { background-position: -200% 0; }
-                    100% { background-position: 200% 0; }
-                }
-
-                /* General animations */
-                @keyframes fadeInUp {
-                    from { opacity: 0; transform: translateY(20px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                @keyframes slideInRight {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-                .animate-fadeInUp { animation: fadeInUp 0.5s ease-out forwards; }
-                .animate-slideInRight { animation: slideInRight 0.5s ease-out forwards; }
-
-                /* Leaderboard Styles */
-                .leaderboard-modal {
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,0.9);
-                backdrop-filter: blur(8px);
-                z-index: 9999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 16px;
-                }
-
-                .leaderboard-content {
-                background: var(--bg-secondary);
-                border-radius: 24px;
-                max-width: 500px;
-                width: 100%;
-                max-height: 90vh; /* Adjusted for better fit */
-                overflow-y: auto;
-                border: 2px solid var(--bg-tertiary);
-                box-shadow: 0 10px 40px rgba(0,0,0,0.5); /* Stronger shadow */
-                }
-
-                .leaderboard-tabs {
-                display: flex;
-                border-bottom: 2px solid var(--bg-tertiary);
-                }
-
-                .leaderboard-tab {
-                flex: 1;
-                padding: 16px;
-                text-align: center;
-                background: transparent;
-                border: none;
-                cursor: pointer;
-                transition: all 0.3s ease;
-                color: var(--text-secondary); /* Default tab text color */
-                }
-
-                .leaderboard-tab.active {
-                background: var(--accent-info);
-                color: white;
-                }
-
-                .leaderboard-entry {
-                display: flex;
-                align-items: center;
-                padding: 12px 16px;
-                border-bottom: 1px solid var(--bg-tertiary);
-                transition: background 0.2s ease;
-                }
-
-                .leaderboard-entry:last-child {
-                    border-bottom: none;
-                }
-
-                .leaderboard-entry:hover {
-                background: var(--bg-tertiary);
-                }
-
-                .leaderboard-entry.current-user {
-                background: var(--accent-info)20; /* Lighter background */
-                border-left: 4px solid var(--accent-info);
-                }
-
-                /* Rank Badge Styles */
-                .rank-badge {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center; /* Center content horizontally */
-                padding: 8px 12px;
-                border-radius: 20px;
-                font-weight: bold;
-                font-size: 0.875rem;
-                color: var(--text-primary); /* Default color for non-special ranks */
-                min-width: 90px; /* Ensure consistent width */
-                }
-
-                .rank-badge.top-10 {
-                background: linear-gradient(135deg, #FFD700, #FFA500); /* Gold */
-                color: #1a1a1a; /* Dark text on gold */
-                animation: pulse-gold 2s infinite;
-                }
-
-                .rank-badge.top-50 {
-                background: linear-gradient(135deg, #C0C0C0, #A0A0A0); /* Silver */
-                color: #1a1a1a;
-                }
-
-                .rank-badge.top-100 {
-                background: linear-gradient(135deg, #CD7F32, #8B4513); /* Bronze */
-                color: #fff;
-                }
-                .rank-badge.standard {
-                    background: var(--bg-tertiary);
-                    color: var(--text-primary);
-                }
-
-                /* Animated Streak Styles */
-                .streak-display-container {
-                text-align: center;
-                }
-
-                .streak-number {
-                font-size: 4rem;
-                font-weight: 800;
-                line-height: 1;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 8px;
-                transition: all 0.5s ease;
-                color: var(--text-primary); /* Default color */
-                }
-
-                .streak-number.celebrating {
-                animation: celebrate 1s ease-in-out;
-                color: var(--accent-win);
-                }
-
-                .streak-flame {
-                animation: flicker 1.5s infinite;
-                }
-
-                @keyframes celebrate {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.1); }
-                }
-
-                @keyframes flicker {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.7; }
-                }
-
-                @keyframes pulse-gold {
-                0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
-                70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
-                }
-
-                /* Mobile timer and date fixes */
-                @media (max-width: 640px) {
-                    .team-selection-container {
-                        grid-template-columns: 1fr 50px 1fr;
-                        gap: var(--space-md);
-                        padding: var(--space-md);
-                    }
-                    
-                    .team-card {
-                        min-height: 140px;
-                        padding: var(--space-md);
-                    }
-                    
-                    .vs-divider {
-                        width: 50px;
-                        height: 50px;
-                        font-size: 1rem;
-                    }
-                }
-
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -2634,7 +2434,7 @@ const App = ({ user }) => {
                         <span className="text-xs text-text-secondary">
                             📡 Live
                         </span>
-                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
+                        <span className="text-xs text-text-secondary">{todaysMatchup.venue}</span>
                     </div>
 
                     {/* Team vs Team using the new team-selection-container grid */}
@@ -2665,6 +2465,7 @@ const App = ({ user }) => {
                                 startTime={todaysMatchup.startTime} 
                                 setTimeLeft={setTimeLeft}
                                 matchupId={todaysMatchup.id}
+                                setGameStarted={setGameStarted} // Pass setGameStarted as a prop
                             />
                         ) : (
                             <div className="text-red-500">⚠️ No game time available</div>
@@ -2677,7 +2478,7 @@ const App = ({ user }) => {
                     
                     {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
                     {(hasPickedToday || gameStarted) && (
-                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
+                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20">
                             <p className="font-semibold text-text-primary">
                                 {hasPickedToday ?
                                     `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
@@ -2843,7 +2644,7 @@ export default function Page() {
             try {
                 console.log('Checking for Whop user...');
                 
-                // FIX: Use window.location.origin to build complete URL
+                // Use window.location.origin to build complete URL
                 const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
                 
                 // First, try to get real Whop user from headers
