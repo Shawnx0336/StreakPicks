@@ -10,6 +10,7 @@
 	},
 	"dependencies": {
 		"@vercel/functions": "^2.0.3",
+		"@whop-apps/sdk": "^0.0.1-canary.116",
 		"@whop/api": "^0.0.27",
 		"@whop/react": "0.2.6",
 		"firebase": "^11.9.1",
