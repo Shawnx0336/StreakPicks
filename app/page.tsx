@@ -227,20 +227,15 @@ const getDisplayName = (user) => {
     return user?.username || user?.name || user?.email?.split('@')[0] || `WhopUser${simpleHash(user?.id || 'anonymous')}`;
 };
 
-// ========== FIX 1: FORCE CONSISTENT DATE STRING ==========
 /**
- * UPDATED: Force exact same date string on all platforms
+ * Generates a consistent date string in YYYY-MM-DD format, suitable for comparisons.
+ * IMPORTANT: This now uses UTC date components for global consistency.
+ * @returns {string} Date string in 'YYYY-MM-DD' format.
  */
 const getTodayDateString = () => {
-    // FORCE CONSISTENT DATE - Remove timezone differences
     const now = new Date();
-    const utcYear = now.getUTCFullYear();
-    const utcMonth = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const utcDay = String(now.getUTCDate()).padStart(2, '0');
-    
-    const dateString = `${utcYear}-${utcMonth}-${utcDay}`;
-    console.log('🗓️ UNIFIED DATE STRING:', dateString);
-    return dateString;
+    // Use UTC date components to ensure consistency across timezones for the "day"
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
 };
 
 /**
@@ -264,68 +259,193 @@ const safeParseDate = (dateInput) => {
     return isValidDate(date) ? date : null;
 };
 
-/**
- * Validates matchup data to ensure it has all required fields and valid dates.
- * @param {Object} matchup - The matchup object to validate.
- * @returns {{ isValid: boolean, error?: string, gameTime: Date }} Validation result.
- */
-const validateMatchupData = (matchup) => {
-    if (!matchup) {
-        console.warn('No matchup data provided');
-        return { 
-            isValid: true, 
-            gameTime: new Date(Date.now() + 60 * 60 * 1000), // Fallback: 1 hour from now
-            error: 'No matchup data, using fallback time' 
-        };
-    }
 
-    if (!matchup.startTime) {
-        console.warn('No startTime in matchup:', matchup);
-        return { 
-            isValid: true, 
-            gameTime: new Date(Date.now() + 60 * 60 * 1000), 
-            error: 'No start time, using fallback time' 
-        };
-    }
-
-    let gameTime = matchup.startTime;
-    if (!(gameTime instanceof Date)) {
-        console.log('Parsing startTime string:', gameTime);
-        gameTime = new Date(gameTime);
-    }
-
-    if (isNaN(gameTime.getTime())) {
-        console.warn('Invalid startTime format:', matchup.startTime);
-        gameTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback: 1 hour from now
-        return { 
-            isValid: true, 
-            gameTime, 
-            error: 'Invalid startTime format, using fallback' 
-        };
-    }
-
-    console.log('Valid matchup time:', gameTime.toISOString());
-    return { isValid: true, gameTime };
+// MLB Team Colors
+const getMLBTeamColors = (abbr) => {
+    const teamColors = {
+        // American League East
+        'BAL': ['DF4601', '000000'], // Orange, Black
+        'BOS': ['BD3039', '0C2340'], // Red, Navy
+        'NYY': ['132448', 'C4CED4'], // Navy, Silver
+        'TB': ['092C5C', '8FBCE6'], // Navy, Light Blue
+        'TOR': ['134A8E', 'E8291C'], // Blue, Red
+        
+        // American League Central
+        'CWS': ['000000', 'C4CED4'], // Black, Silver
+        'CLE': ['E31937', '0C2340'], // Red, Navy
+        'DET': ['0C2340', 'FA4616'], // Navy, Orange
+        'KC': ['004687', 'BD9B60'], // Blue, Gold
+        'MIN': ['002B5C', 'D31145'], // Navy, Red
+        
+        // American League West
+        'HOU': ['002D62', 'EB6E1F'], // Navy, Orange
+        'LAA': ['BA0021', '003263'], // Red, Navy
+        'OAK': ['003831', 'EFB21E'], // Green, Gold
+        'SEA': ['0C2C56', '005C5C'], // Navy, Teal
+        'TEX': ['003278', 'C0111F'], // Blue, Red
+        
+        // National League East
+        'ATL': ['CE1141', '13274F'], // Red, Navy
+        'MIA': ['00A3E0', 'EF3340'], // Blue, Red
+        'NYM': ['002D72', 'FF5910'], // Blue, Orange
+        'PHI': ['E81828', '002D72'], // Red, Blue
+        'WSH': ['AB0003', '14225A'], // Red, Navy
+        
+        // National League Central
+        'CHC': ['0E3386', 'CC3433'], // Blue, Red
+        'CIN': ['C6011F', '000000'], // Red, Black
+        'MIL': ['FFC52F', '12284B'], // Gold, Navy
+        'PIT': ['FDB827', '27251F'], // Gold, Black
+        'STL': ['C41E3A', '0C2340'], // Red, Navy
+        
+        // National League West
+        'ARI': ['A71930', 'E3D4AD'], // Red, Tan
+        'COL': ['33006F', 'C4CED4'], // Purple, Silver
+        'LAD': ['005A9C', 'EF3E42'], // Blue, Red
+        'SD': ['2F241D', 'FFC425'], // Brown, Gold
+        'SF': ['FD5A1E', '27251F']  // Orange, Black
+    };
+    
+    return teamColors[abbr] || ['505050', '808080']; // Default gray colors
 };
 
-// ========== FIX 3: REMOVE ALL MOBILE DETECTION ==========
 /**
- * UPDATED: Remove universalDateParser - use standard parsing only
+ * SINGLE SOURCE OF TRUTH - Gets today's MLB game
+ * NO FALLBACKS, NO SIMULATIONS, NO EXCEPTIONS
  */
-const parseDate = (dateInput) => {
-    if (!dateInput) return null;
+const getTodaysMLBGame = async () => {
+    console.log('🎯 SINGLE API CALL - STARTING');
     
-    // STANDARD PARSING ONLY - No mobile-specific logic
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
+    
+    console.log('📡 Fetching from:', apiUrl);
+    
     try {
-        const date = new Date(dateInput);
-        if (!isNaN(date.getTime())) {
-            return date;
+        const response = await fetch(apiUrl, {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'StreakPickem/1.0'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`MLB API returned ${response.status}: ${response.statusText}`);
         }
+        
+        const data = await response.json();
+        console.log('📥 Raw API response:', data);
+        
+        // STRICT VALIDATION - NO MERCY
+        if (!data?.dates?.[0]?.games?.length) {
+            throw new Error(`No MLB games found for ${today}`);
+        }
+        
+        // TAKE FIRST AVAILABLE GAME - PERIOD
+        const game = data.dates[0].games[0];
+        console.log('🎯 Selected game:', game.teams.home.team.name, 'vs', game.teams.away.team.name);
+        
+        // RETURN STANDARDIZED FORMAT
+        return {
+            id: game.gamePk.toString(),
+            homeTeam: {
+                name: game.teams.home.team.name,
+                abbr: game.teams.home.team.abbreviation,
+                logo: '⚾',
+                colors: getMLBTeamColors(game.teams.home.team.abbreviation) 
+            },
+            awayTeam: {
+                name: game.teams.away.team.name,
+                abbr: game.teams.away.team.abbreviation,
+                logo: '⚾',
+                colors: getMLBTeamColors(game.teams.away.team.abbreviation) 
+            },
+            sport: 'MLB',
+            venue: game.venue?.name || 'MLB Stadium',
+            startTime: new Date(game.gameDate).toISOString(),
+            status: 'upcoming'
+        };
+        
     } catch (error) {
-        console.error('Date parsing failed:', error);
+        console.error('❌ MLB API FAILED:', error.message);
+        throw error; // DON'T CATCH - LET IT FAIL
     }
-    
-    return null;
+};
+
+
+/**
+ * Fetches actual MLB game result using MLB Official API
+ * @param {string} gameId - MLB game ID (gamePk)
+ * @param {string} sport - Sport type (should be 'MLB')
+ * @returns {Promise<Object|null>} Game result or null
+ */
+const fetchMLBGameResult = async (gameId, sport) => {
+    try {
+        console.log(`Fetching MLB game result for game ${gameId}`);
+        
+        const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
+        const response = await fetch(gameUrl);
+        
+        if (!response.ok) {
+            throw new Error(`MLB API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Check if game is completed
+        const gameData = data.gameData;
+        const liveData = data.liveData;
+        
+        if (!gameData || !liveData) {
+            throw new Error('Invalid game data structure');
+        }
+        
+        const gameStatus = gameData.status.statusCode;
+        if (gameStatus !== 'F' && gameStatus !== 'O') { // F = Final, O = Official
+            console.log(`Game ${gameId} not finished yet. Status: ${gameData.status.detailedState}`);
+            return null;
+        }
+        
+        // Extract final scores
+        const homeScore = liveData.linescore?.teams?.home?.runs || 0;
+        const awayScore = liveData.linescore?.teams?.away?.runs || 0;
+        
+        let winner = null;
+        if (homeScore > awayScore) {
+            winner = 'home';
+        } else if (awayScore > homeScore) {
+            winner = 'away';
+        } else {
+            winner = 'tie'; // Very rare in baseball
+        }
+        
+        const homeTeam = gameData.teams.home;
+        const awayTeam = gameData.teams.away;
+        
+        return {
+            gameId: gameId,
+            status: 'completed',
+            homeScore: homeScore,
+            awayScore: awayScore,
+            winner: winner,
+            homeTeam: {
+                name: homeTeam.name,
+                abbreviation: homeTeam.abbreviation,
+                score: homeScore
+            },
+            awayTeam: {
+                name: awayTeam.name,
+                abbreviation: awayTeam.abbreviation,
+                score: awayScore
+            },
+            completedAt: new Date(),
+            rawGameData: data
+        };
+        
+    } catch (error) {
+        console.error(`Error fetching MLB game result for ${gameId}:`, error);
+        return null;
+    }
 };
 
 
@@ -672,720 +792,6 @@ const initialUserState = {
     }
 };
 
-// Matchup Pool for simulated data (seasonal fallback and ultimate fallback)
-const matchupPool = [
-    // NBA Matchups (use emoji logos for simplicity)
-    {
-        id: 'lal-vs-bos',
-        homeTeam: {
-            name: 'Lakers',
-            abbr: 'LAL',
-            logo: '🏀',
-            colors: ['552583', 'FDB927']
-        },
-        awayTeam: {
-            name: 'Celtics',
-            abbr: 'BOS',
-            logo: '🏀',
-            colors: ['007A33', 'BA9653']
-        },
-        sport: 'NBA',
-        venue: 'Crypto.com Arena'
-    },
-    {
-        id: 'gsw-vs-chi',
-        homeTeam: {
-            name: 'Warriors',
-            abbr: 'GSW',
-            logo: '🏀',
-            colors: ['1D428A', 'FFC72C']
-        },
-        awayTeam: {
-            name: 'Bulls',
-            abbr: 'CHI',
-            logo: '🏀',
-            colors: ['CE1141', '000000']
-        },
-        sport: 'NBA',
-        venue: 'Chase Center'
-    },
-
-    // NFL Matchups
-    {
-        id: 'kc-vs-buf',
-        homeTeam: {
-            name: 'Chiefs',
-            abbr: 'KC',
-            logo: '🏈',
-            colors: ['E31837', 'FFB81C']
-        },
-        awayTeam: {
-            name: 'Bills',
-            abbr: 'BUF',
-            logo: '🏈',
-            colors: ['00338D', 'C60C30']
-        },
-        sport: 'NFL',
-        venue: 'Arrowhead Stadium'
-    },
-    {
-        id: 'dal-vs-gb',
-        homeTeam: {
-            name: 'Cowboys',
-            abbr: 'DAL',
-            logo: '🏈',
-            colors: ['003594', '869397']
-        },
-        awayTeam: {
-            name: 'Packers',
-            abbr: 'GB',
-            logo: '🏈',
-            colors: ['203731', 'FFB612']
-        },
-        sport: 'NFL',
-        venue: 'AT&T Arena'
-    },
-
-    // MLB Matchups
-    {
-        id: 'nyy-vs-bos-mlb',
-        homeTeam: {
-            name: 'Yankees',
-            abbr: 'NYY',
-            logo: '⚾',
-            colors: ['132448', 'C4CED4']
-        },
-        awayTeam: {
-            name: 'Red Sox',
-            abbr: 'BOS',
-            logo: '⚾',
-            colors: ['BD3039', '0C2340']
-        },
-        sport: 'MLB',
-        venue: 'Yankee Stadium'
-    },
-    {
-        id: 'lad-vs-sf',
-        homeTeam: {
-            name: 'Dodgers',
-            abbr: 'LAD',
-            logo: '⚾',
-            colors: ['005A9C', 'EF3E42']
-        },
-        awayTeam: {
-            name: 'Giants',
-            abbr: 'SF',
-            logo: '⚾',
-            colors: ['FD5A1E', '27251F']
-        },
-        sport: 'MLB',
-        venue: 'Dodger Stadium'
-    },
-    {
-        id: 'hou-vs-phi',
-        homeTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
-        awayTeam: { name: 'Phillies', abbr: 'PHI', logo: '⚾', colors: ['E81828', '2D2D2D'] },
-        sport: 'MLB',
-        venue: 'Minute Main Park'
-    },
-
-    // NHL Matchups
-    {
-        id: 'tor-vs-mtl',
-        homeTeam: { name: 'Maple Leafs', abbr: 'TOR', logo: '🏒', colors: ['00205B', 'A2AAAD'] },
-        awayTeam: { name: 'Canadiens', abbr: 'MTL', logo: '🏒', colors: ['BF2133', '192852'] },
-        sport: 'NHL',
-        venue: 'Scotiabank Arena'
-    },
-    {
-        id: 'bos-vs-chi-nhl',
-        homeTeam: { name: 'Bruins', abbr: 'BOS', logo: '🏒', colors: ['FFB81C', '000000'] },
-        awayTeam: { name: 'Blackhawks', abbr: 'CHI', logo: '🏒', colors: ['E32637', '000000'] },
-        sport: 'NHL',
-        venue: 'TD Garden'
-    },
-
-    // Soccer Matchups (Example)
-    {
-        id: 'rm-vs-fcb',
-        homeTeam: { name: 'Real Madrid', abbr: 'RMA', logo: '⚽', colors: ['FFFFFF', '0056B9'] },
-        awayTeam: { name: 'FC Barcelona', abbr: 'FCB', logo: '⚽', colors: ['A50044', '004D98'] },
-        sport: 'Soccer',
-        venue: 'Santiago Bernabéu'
-    },
-    {
-        id: 'man-utd-vs-liv',
-        homeTeam: { name: 'Man Utd', abbr: 'MUN', logo: '⚽', colors: ['DA291C', '000000'] },
-        awayTeam: { name: 'Liverpool', abbr: 'LIV', logo: '⚽', colors: ['C8102E', 'F6EB1C'] },
-        sport: 'Soccer',
-        venue: 'Old Trafford'
-    },
-
-    // College Basketball (Example)
-    {
-        id: 'duke-vs-unc',
-        homeTeam: { name: 'Duke', abbr: 'DUKE', logo: '🏀', colors: ['001A57', 'C8C8C8'] },
-        awayTeam: { name: 'UNC', abbr: 'UNC', logo: '🏀', colors: ['4B9CD3', 'FFFFFF'] },
-        sport: 'NCAAB',
-        venue: 'Cameron Indoor Stadium'
-    },
-    {
-        id: 'vill-vs-gtown',
-        homeTeam: { name: 'Villanova', abbr: 'VILL', logo: '🏀', colors: ['00205B', 'FFFFFF'] },
-        awayTeam: { name: 'Georgetown', abbr: 'GTOWN', logo: '🏀', colors: ['00205B', '63666A'] },
-        sport: 'NCAAB',
-        venue: 'Finneran Pavilion'
-    },
-
-    // More diverse matchups
-    {
-        id: 'golden-state-vs-lakers',
-        homeTeam: { name: 'Golden State', abbr: 'GSW', logo: '🏀', colors: ['1D428A', 'FFC72C'] },
-        awayTeam: { name: 'Lakers', abbr: 'LAL', logo: '🏀', colors: ['552583', 'FDB927'] },
-        sport: 'NBA',
-        venue: 'Chase Center'
-    },
-    {
-        id: 'dallas-vs-miami',
-        homeTeam: { name: 'Dallas', abbr: 'DAL', logo: '🏀', colors: ['0078AE', '00285E'] },
-        awayTeam: { name: 'Miami', abbr: 'MIA', logo: '🏀', colors: ['98002E', 'F9A01B'] },
-        sport: 'NBA',
-        venue: 'American Airlines Center'
-    },
-    {
-        id: 'seattle-vs-la-rams',
-        homeTeam: { name: 'Seahawks', abbr: 'SEA', logo: '🏈', colors: ['002244', '69BE28'] },
-        awayTeam: { name: 'Rams', abbr: 'LAR', logo: '🏈', colors: ['002244', '85714D'] },
-        sport: 'NFL',
-        venue: 'Lumen Field'
-    },
-    {
-        id: 'green-bay-vs-minnesota',
-        homeTeam: { name: 'Packers', abbr: 'GB', logo: '🏈', colors: ['203731', 'FFB612'] },
-        awayTeam: { name: 'Vikings', abbr: 'MIN', logo: '🏈', colors: ['4F2683', 'FFC62F'] },
-        sport: 'NFL',
-        venue: 'Lambeau Field'
-    },
-    {
-        id: 'boston-vs-la-angels',
-        homeTeam: { name: 'Red Sox', abbr: 'BOS', logo: '⚾', colors: ['BD3039', '0C2340'] },
-        awayTeam: { name: 'Angels', abbr: 'LAA', logo: '⚾', colors: ['BA0021', '862633'] },
-        sport: 'MLB',
-        venue: 'Fenway Park'
-    },
-    {
-        id: 'chicago-cubs-vs-st-louis',
-        homeTeam: { name: 'Cubs', abbr: 'CHC', logo: '⚾', colors: ['0E3386', 'CC3333'] },
-        awayTeam: { name: 'Cardinals', abbr: 'STL', logo: '⚾', colors: ['C41E3A', '0C2340'] },
-        sport: 'MLB',
-        venue: 'Wrigley Field'
-    },
-    {
-        id: 'pittsburgh-vs-philadelphia-nhl',
-        homeTeam: { name: 'Penguins', abbr: 'PIT', logo: '🏒', colors: ['000000', 'FCB514'] },
-        awayTeam: { name: 'Flyers', abbr: 'PHI', logo: '🏒', colors: ['F74902', '000000'] },
-        sport: 'NHL',
-        venue: 'PPG Paints Arena'
-    },
-    {
-        id: 'colorado-vs-vegas',
-        homeTeam: { name: 'Avalanche', abbr: 'COL', logo: '🏒', colors: ['6F263D', '236192'] },
-        awayTeam: { name: 'Golden Knights', abbr: 'VGK', logo: '🏒', colors: ['B4975A', '333333'] },
-        sport: 'NHL',
-        venue: 'Ball Arena'
-    },
-    {
-        id: 'paris-sg-vs-bayern',
-        homeTeam: { name: 'Paris SG', abbr: 'PSG', logo: '⚽', colors: ['004170', 'DA291C'] },
-        awayTeam: { name: 'Bayern Munich', abbr: 'BAY', logo: '⚽', colors: ['DC052D', '0066B2'] },
-        sport: 'Soccer',
-        venue: 'Santiago Bernabéu'
-    }
-];
-
-/**
- * Determines the current sport based on calendar season
- * @returns {string} Current sport ('MLB', 'NBA', 'NFL')
- */
-const getCurrentSport = () => {
-    const month = new Date().getMonth() + 1; // 1-12
-
-    // MLB Season: April through September
-    if (month >= 4 && month <= 9) {
-        return 'MLB';
-    }
-    // NBA Season: October through March
-    else if (month >= 10 || month <= 3) {
-        return 'NBA';
-    }
-    // NFL Season: September through February (overlaps with NBA)
-    else if (month >= 9 && month <= 2) {
-        return 'NFL';
-    }
-
-    return 'MLB'; // Default fallback
-};
-
-/**
- * Maps sport to ESPN API endpoint
- * @param {string} sport - Sport type ('MLB', 'NBA', 'NFL')
- * @param {Date | null} date - Optional date to filter games.
- * @returns {string} ESPN API URL
- */
-const getSportEndpoint = (sport, date = null) => {
-    const endpoints = {
-        'MLB': 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard',
-        'NBA': 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-        'NFL': 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
-        'NHL': 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard'
-    };
-    
-    let url = endpoints[sport] || endpoints['MLB'];
-    
-    // Add date parameter for current date's games (works for any day)
-    if (date) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const dateString = `${year}${month}${day}`;
-        url += `?dates=${dateString}`;
-    }
-    
-    return url;
-};
-
-/**
- * Maps sport to appropriate emoji logo
- * @param {string} sport - Sport type
- * @returns {string} Emoji for the sport
- */
-const getSportEmoji = (sport) => {
-    const emojis = {
-        'MLB': '⚾',
-        'NBA': '🏀',
-        'NFL': '🏈',
-        'NHL': '🏒',
-        'Soccer': '⚽', // Added for soccer in pool
-        'NCAAB': '🏀' // Added for college basketball in pool
-    };
-    return emojis[sport] || '❓'; // Default to question mark for unknown
-};
-
-// CRITICAL: Multi-layer validation system
-const GAME_VALIDATION_RULES = {
-    MIN_HOURS_PAST: -6,           // Allow games up to 6 hours ago (for late results)
-    MAX_HOURS_FUTURE: 168,       // Up to 7 days in advance
-    MIN_HOUR_OF_DAY: 0,          // Allow all hours (24/7)
-    MAX_HOUR_OF_DAY: 23,         // Allow all hours (24/7)
-    REQUIRED_FIELDS: ['homeTeam.name', 'awayTeam.name', 'startTime', 'venue']
-};
-
-/**
- * Validates raw game data against a set of rules.
- * @param {Object} gameData - Raw game data.
- * @returns {{ valid: boolean, reason?: string }} Validation result.
- */
-const validateGameData = (gameData) => {
-    // Basic checks
-    if (!gameData?.startTime || !gameData?.homeTeam?.name || !gameData?.awayTeam?.name) {
-        return { valid: false, reason: 'Missing required data' };
-    }
-
-    const gameTime = new Date(gameData.startTime);
-    const now = new Date();
-    
-    const isFuture = gameTime > now;
-    
-    if (!isFuture) {
-        console.log(`Game already started: ${gameData.homeTeam?.name} vs ${gameData.awayTeam?.name} at ${gameTime.toLocaleTimeString()}`);
-        return { valid: false, reason: 'Already started' };
-    }
-
-    console.log('VALID GAME:', {
-        game: `${gameData.homeTeam.name} vs ${gameData.awayTeam.name}`,
-        time: gameTime.toLocaleTimeString(),
-        minutesFromNow: Math.round((gameTime - now) / (1000 * 60))
-    });
-
-    return { valid: true };
-};
-
-// ========== FIX 2: FORCE DETERMINISTIC GAME SELECTION ==========
-/**
- * UPDATED: Make game selection 100% deterministic across platforms
- */
-const selectDailyGame = (validGames) => {
-    if (validGames.length === 0) {
-        throw new Error('No valid games available for today');
-    }
-
-    // FORCE CONSISTENT SORTING - Remove any platform differences
-    const sortedGames = [...validGames].sort((a, b) => {
-        // Sort by start time ONLY for consistency
-        const aTime = new Date(a.startTime).getTime();
-        const bTime = new Date(b.startTime).getTime();
-        return aTime - bTime;
-    });
-
-    // FORCE DETERMINISTIC SEED - Use EXACT same calculation
-    const todayUTC = getTodayDateString(); // "2025-06-16"
-    const year = parseInt(todayUTC.split('-')[0]); // 2025
-    const month = parseInt(todayUTC.split('-')[1]); // 6
-    const day = parseInt(todayUTC.split('-')[2]); // 16
-    
-    // Simple, consistent seed calculation
-    const seed = (year + month + day) % sortedGames.length;
-    const selectedGame = sortedGames[seed];
-
-    console.log('🎯 UNIFIED GAME SELECTION:', {
-        totalGames: validGames.length,
-        seed: seed,
-        selectedIndex: seed,
-        selected: `${selectedGame.homeTeam.name} vs ${selectedGame.awayTeam.name}`,
-        startTime: selectedGame.startTime,
-        dateString: todayUTC
-    });
-
-    return selectedGame;
-};
-
-/**
- * Parses MLB API game data into app's Matchup format
- * @param {Object} game - Raw game data from MLB API
- * @returns {Matchup} Formatted matchup object
- */
-const parseMLBGameData = (game) => {
-    try {
-        const homeTeam = game.teams.home.team;
-        const awayTeam = game.teams.away.team;
-        
-        if (!homeTeam || !awayTeam) {
-            throw new Error('Missing team data in MLB game');
-        }
-        
-        // Parse game date - MLB API provides ISO string
-        let gameStartTime;
-        try {
-            gameStartTime = new Date(game.gameDate);
-            if (isNaN(gameStartTime.getTime())) {
-                throw new Error('Invalid game date format');
-            }
-        } catch (dateError) {
-            console.warn('Date parsing failed, using fallback');
-            gameStartTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
-        }
-        
-        console.log('MLB game parsed:', {
-            home: homeTeam.name,
-            away: awayTeam.name,
-            time: gameStartTime.toLocaleString(),
-            venue: game.venue?.name || 'MLB Stadium'
-        });
-        
-        return {
-            id: game.gamePk.toString(),
-            homeTeam: {
-                name: homeTeam.name,
-                abbr: homeTeam.abbreviation,
-                logo: '⚾',
-                colors: getMLBTeamColors(homeTeam.abbreviation)
-            },
-            awayTeam: {
-                name: awayTeam.name,
-                abbr: awayTeam.abbreviation,
-                logo: '⚾',
-                colors: getMLBTeamColors(awayTeam.abbreviation)
-            },
-            sport: 'MLB',
-            venue: game.venue?.name || 'MLB Stadium',
-            startTime: gameStartTime.toISOString(),
-            status: game.status?.detailedState || 'scheduled'
-        };
-        
-    } catch (error) {
-        console.error('Error parsing MLB game data:', error);
-        throw error;
-    }
-};
-
-
-/**
- * Gets MLB team colors by abbreviation
- * @param {string} abbr - Team abbreviation (e.g., 'NYY', 'BOS')
- * @returns {string[]} Array of primary and secondary colors
- */
-const getMLBTeamColors = (abbr) => {
-    const teamColors = {
-        // American League East
-        'BAL': ['DF4601', '000000'], // Orange, Black
-        'BOS': ['BD3039', '0C2340'], // Red, Navy
-        'NYY': ['132448', 'C4CED4'], // Navy, Silver
-        'TB': ['092C5C', '8FBCE6'], // Navy, Light Blue
-        'TOR': ['134A8E', 'E8291C'], // Blue, Red
-        
-        // American League Central
-        'CWS': ['000000', 'C4CED4'], // Black, Silver
-        'CLE': ['E31937', '0C2340'], // Red, Navy
-        'DET': ['0C2340', 'FA4616'], // Navy, Orange
-        'KC': ['004687', 'BD9B60'], // Blue, Gold
-        'MIN': ['002B5C', 'D31145'], // Navy, Red
-        
-        // American League West
-        'HOU': ['002D62', 'EB6E1F'], // Navy, Orange
-        'LAA': ['BA0021', '003263'], // Red, Navy
-        'OAK': ['003831', 'EFB21E'], // Green, Gold
-        'SEA': ['0C2C56', '005C5C'], // Navy, Teal
-        'TEX': ['003278', 'C0111F'], // Blue, Red
-        
-        // National League East
-        'ATL': ['CE1141', '13274F'], // Red, Navy
-        'MIA': ['00A3E0', 'EF3340'], // Blue, Red
-        'NYM': ['002D72', 'FF5910'], // Blue, Orange
-        'PHI': ['E81828', '002D72'], // Red, Blue
-        'WSH': ['AB0003', '14225A'], // Red, Navy
-        
-        // National League Central
-        'CHC': ['0E3386', 'CC3433'], // Blue, Red
-        'CIN': ['C6011F', '000000'], // Red, Black
-        'MIL': ['FFC52F', '12284B'], // Gold, Navy
-        'PIT': ['FDB827', '27251F'], // Gold, Black
-        'STL': ['C41E3A', '0C2340'], // Red, Navy
-        
-        // National League West
-        'ARI': ['A71930', 'E3D4AD'], // Red, Tan
-        'COL': ['33006F', 'C4CED4'], // Purple, Silver
-        'LAD': ['005A9C', 'EF3E42'], // Blue, Red
-        'SD': ['2F241D', 'FFC425'], // Brown, Gold
-        'SF': ['FD5A1E', '27251F']  // Orange, Black
-    };
-    
-    return teamColors[abbr] || ['505050', '808080']; // Default gray colors
-};
-
-// ========== FIX 4: UNIFIED MLB DATA FETCHING ==========
-/**
- * UPDATED: Remove mobile-specific timeout/logic
- */
-const fetchMLBData = async (retryCount = 0) => {
-    const MAX_RETRIES = 2;
-    const TIMEOUT_MS = 10000; // Same for all platforms
-
-    try {
-        console.log(`⚾ MLB API Request (Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-        // FORCE CONSISTENT DATE - Use the unified function
-        const dateString = getTodayDateString();
-        const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateString}`;
-        
-        console.log(`📅 UNIFIED API CALL: ${apiUrl}`);
-        
-        const response = await fetch(apiUrl, {
-            signal: controller.signal,
-            headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'StreakPickem/1.0'
-            }
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`MLB API returned ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('✅ MLB API Response received');
-        
-        if (!data.dates || data.dates.length === 0 || !data.dates[0].games || data.dates[0].games.length === 0) {
-            throw new Error(`No MLB games found for ${dateString}`);
-        }
-        
-        const games = data.dates[0].games;
-        console.log(`✅ Found ${games.length} MLB games for ${dateString}`);
-        
-        // Process games - IDENTICAL logic for all platforms
-        const allValidGames = [];
-        
-        for (const game of games) {
-            try {
-                const parsedGame = parseMLBGameData(game);
-                const validation = validateGameData(parsedGame);
-                
-                if (validation.valid) {
-                    allValidGames.push(parsedGame);
-                }
-            } catch (parseError) {
-                console.warn(`Failed to parse game:`, parseError.message);
-            }
-        }
-        
-        console.log(`✅ Valid games: ${allValidGames.length}`);
-        
-        if (allValidGames.length === 0) {
-            throw new Error(`No valid games after processing`);
-        }
-        
-        // UNIFIED GAME SELECTION
-        return selectDailyGame(allValidGames);
-        
-    } catch (error) {
-        console.error(`🚨 MLB API Error (Attempt ${retryCount + 1}):`, error.message);
-        
-        if (retryCount < MAX_RETRIES) {
-            const delayMs = Math.pow(2, retryCount) * 1000;
-            console.log(`⏰ Retrying in ${delayMs}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-            return fetchMLBData(retryCount + 1);
-        }
-        
-        throw error;
-    }
-};
-
-
-// ========== FIX 5: UNIFIED SEASONAL SIMULATION ==========
-/**
- * UPDATED: Remove mobile-specific logic from simulation
- */
-const generateSeasonalSimulation = (date) => {
-    const currentSport = getCurrentSport();
-    const sportEmoji = getSportEmoji(currentSport);
-
-    const seasonalMatchups = matchupPool.filter(m => m.sport === currentSport);
-    const availableMatchups = seasonalMatchups.length > 0 ? seasonalMatchups : matchupPool;
-
-    // FORCE SAME SEED CALCULATION as selectDailyGame
-    const todayUTC = getTodayDateString();
-    const year = parseInt(todayUTC.split('-')[0]);
-    const month = parseInt(todayUTC.split('-')[1]);
-    const day = parseInt(todayUTC.split('-')[2]);
-    const seed = (year + month + day) % availableMatchups.length;
-    
-    const selectedMatchup = availableMatchups[seed];
-
-    // CONSISTENT GAME TIME - 2 hours from now for all platforms
-    const gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-
-    console.log('🎮 UNIFIED SIMULATION:', {
-        sport: currentSport,
-        seed: seed,
-        selected: `${selectedMatchup.homeTeam.name} vs ${selectedMatchup.awayTeam.name}`,
-        gameTime: gameTime.toISOString()
-    });
-
-    return {
-        ...selectedMatchup,
-        sport: currentSport,
-        homeTeam: { ...selectedMatchup.homeTeam, logo: sportEmoji },
-        awayTeam: { ...selectedMatchup.awayTeam, logo: sportEmoji },
-        startTime: gameTime.toISOString(),
-        status: 'upcoming'
-    };
-};
-
-/**
- * Enhanced daily matchup generator using MLB Official API
- * @param {Date} date - Date for matchup generation
- * @returns {Promise<Matchup>} Real or simulated matchup
- */
-const generateEnhancedDailyMatchup = async (date) => {
-    // Try to fetch real MLB data first
-    try {
-        const realMatchup = await fetchMLBData();
-        if (realMatchup) {
-            console.log('Using real MLB data for daily matchup');
-            console.log(`Game: ${realMatchup.homeTeam.name} vs ${realMatchup.awayTeam.name}`);
-            console.log(`Venue: ${realMatchup.venue}`);
-            console.log(`Time: ${new Date(realMatchup.startTime).toLocaleString()}`);
-            return realMatchup;
-        }
-    } catch (error) {
-        console.log('MLB API failed, falling back to simulation:', error.message);
-    }
-
-    // Fallback to simulation
-    console.log('Using simulated seasonal data for daily matchup');
-    return generateSeasonalSimulation(date);
-};
-
-/**
- * Fetches actual MLB game result using MLB Official API
- * @param {string} gameId - MLB game ID (gamePk)
- * @param {string} sport - Sport type (should be 'MLB')
- * @returns {Promise<Object|null>} Game result or null
- */
-const fetchMLBGameResult = async (gameId, sport) => {
-    try {
-        console.log(`Fetching MLB game result for game ${gameId}`);
-        
-        const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
-        const response = await fetch(gameUrl);
-        
-        if (!response.ok) {
-            throw new Error(`MLB API returned ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        // Check if game is completed
-        const gameData = data.gameData;
-        const liveData = data.data; // Changed from data.liveData to data.data to match typical API structure. If still an issue, might need to revert or inspect API response again
-        
-        if (!gameData || !liveData) {
-            throw new Error('Invalid game data structure');
-        }
-        
-        const gameStatus = gameData.status.statusCode;
-        if (gameStatus !== 'F' && gameStatus !== 'O') { // F = Final, O = Official
-            console.log(`Game ${gameId} not finished yet. Status: ${gameData.status.detailedState}`);
-            return null;
-        }
-        
-        // Extract final scores
-        const homeScore = liveData.linescore?.teams?.home?.runs || 0;
-        const awayScore = liveData.linescore?.teams?.away?.runs || 0;
-        
-        let winner = null;
-        if (homeScore > awayScore) {
-            winner = 'home';
-        } else if (awayScore > homeScore) {
-            winner = 'away';
-        } else {
-            winner = 'tie'; // Very rare in baseball
-        }
-        
-        const homeTeam = gameData.teams.home;
-        const awayTeam = gameData.teams.away;
-        
-        return {
-            gameId: gameId,
-            status: 'completed',
-            homeScore: homeScore,
-            awayScore: awayScore,
-            winner: winner,
-            homeTeam: {
-                name: homeTeam.name,
-                abbreviation: homeTeam.abbreviation,
-                score: homeScore
-            },
-            awayTeam: {
-                name: awayTeam.name,
-                abbreviation: awayTeam.abbreviation,
-                score: awayScore
-            },
-            completedAt: new Date(),
-            rawGameData: data
-        };
-        
-    } catch (error) {
-        console.error(`Error fetching MLB game result for ${gameId}:`, error);
-        return null;
-    }
-};
-
 
 // --- Share Utilities ---
 
@@ -1487,7 +893,9 @@ const shareToInstagram = (text) => {
     // Instagram doesn't have direct URL sharing for posts, but we can copy text for stories/paste
     document.execCommand('copy', false, text);
     // Could attempt to open Instagram app if on mobile
-    // REMOVED MOBILE DETECTION HERE
+    if (/Instagram|iPhone|iPad|Android/i.test(navigator.userAgent)) {
+        window.open('instagram://story-camera', '_blank'); // Tries to open story camera
+    }
 };
 
 const shareToGeneric = async (text, url = '') => {
@@ -1892,11 +1300,11 @@ const LeaderboardModal = ({ isOpen, onClose, userState, leaderboardData, onRefre
     const hashedCurrentUserId = simpleHash(userId).toString();
 
     return (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm">
-            <div className="bg-bg-secondary rounded-2xl p-6 w-[480px] shadow-2xl border-2 border-bg-tertiary relative animate-fadeInUp">
+        <div className="leaderboard-modal animate-fadeInUp">
+            <div className="leaderboard-content bg-bg-secondary text-text-primary">
                 {/* Header */}
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-text-primary">Leaderboard</h3>
+                <div className="p-4 border-b-2 border-bg-tertiary flex justify-between items-center">
+                    <h3 className="text-2xl font-bold">Leaderboard</h3>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={handleRefresh}
@@ -1955,7 +1363,7 @@ const LeaderboardModal = ({ isOpen, onClose, userState, leaderboardData, onRefre
                 </div>
 
                 {/* Leaderboard List */}
-                <div className="py-2" style={{ maxHeight: 'calc(90vh - 200px)', overflowY: 'auto' }}> {/* Adjusted height for better fit */}
+                <div className="py-2">
                     {sortedUsers.length > 0 ? (
                         sortedUsers.map((entry, index) => (
                             <LeaderboardEntry
@@ -2097,25 +1505,14 @@ const ErrorDisplay = ({ message }) => (
 );
 
 
-// ===== EMERGENCY FALLBACK =====
-const EmergencyFallback = () => (
-    <div className="text-center mb-6 px-6">
-        <div className="text-center text-sm text-text-secondary mb-2">
-            Unable to load game time
-        </div>
-        <p className="text-lg font-semibold text-text-primary">
-            <span className="text-yellow-500">⚠️ Please refresh the app</span>
-        </p>
-    </div>
-);
-
-// ========== FIX 6: REMOVE MOBILE-SPECIFIC TIMER LOGIC ==========
+// ========== GAMETIMEDISPLAY WITH ENHANCED DEBUGGING ==========
 /**
- * UPDATED: Simple timer that works identically everywhere
+ * Enhanced GameTimeDisplay with detailed mobile debugging
  */
 const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
+    const [debugInfo, setDebugInfo] = useState({});
 
     useEffect(() => {
         if (!startTime) {
@@ -2124,24 +1521,49 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             return;
         }
 
-        // SIMPLE PARSING - No mobile-specific logic
-        const parsedTime = parseDate(startTime);
-        
-        if (!parsedTime) {
-            const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
-            setGameTime(fallbackTime);
-            setError('Using fallback time');
-        } else {
+        // Enhanced date parsing with debugging
+        let parsedTime = null;
+        const debugSteps = [];
+
+        try {
+            if (startTime instanceof Date) {
+                parsedTime = startTime;
+                debugSteps.push('Used existing Date object');
+            } else {
+                parsedTime = new Date(startTime);
+                debugSteps.push(`Parsed "${startTime}" to Date`);
+            }
+
+            if (isNaN(parsedTime.getTime())) {
+                throw new Error('Invalid date result');
+            }
+
+            debugSteps.push(`Valid date: ${parsedTime.toISOString()}`);
+            debugSteps.push(`Local display: ${parsedTime.toLocaleString()}`);
+            
             setGameTime(parsedTime);
             setError(null);
+            setDebugInfo({ steps: debugSteps, success: true });
+            
+
+        } catch (parseError) {
+            console.error('Date parsing failed:', parseError);
+            const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
+            setGameTime(fallbackTime);
+            setError(`Parse failed: ${parseError.message}`);
+            setDebugInfo({ steps: debugSteps, error: parseError.message });
         }
     }, [startTime, matchupId]);
 
-    // SIMPLE TIMER - Same logic for all platforms
+    // Enhanced timer logic with debugging
     useEffect(() => {
         if (!gameTime) return;
 
+        let isActive = true;
+
         const updateTimer = () => {
+            if (!isActive) return;
+
             const now = new Date();
             const diff = gameTime - now;
 
@@ -2154,12 +1576,18 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
             
-            setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+            const timeString = `${hours}h ${minutes}m ${seconds}s`;
+            setTimeLeft(timeString);
+            
         };
 
-        updateTimer();
+        updateTimer(); // Initial call
         const intervalId = setInterval(updateTimer, 1000);
-        return () => clearInterval(intervalId);
+
+        return () => {
+            isActive = false;
+            clearInterval(intervalId);
+        };
     }, [gameTime, setTimeLeft]);
 
     if (!gameTime) {
@@ -2196,14 +1624,6 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
  * Modified App component with comprehensive debugging
  */
 const App = ({ user }) => {
-    // FORCE DESKTOP BEHAVIOR
-    useEffect(() => {
-        // Override user agent detection
-        Object.defineProperty(navigator, 'userAgent', {
-            get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        });
-    }, []);
-
     const userId = user?.id || 'anonymous';
     const [userState, setUserState] = useLocalStorage('streakPickemUser', initialUserState, userId);
     
@@ -2264,46 +1684,29 @@ const App = ({ user }) => {
         });
     }, [user, currentWeekMonday, setUserState]);
 
-    // Load today's matchup (real or simulated)
+    // Load today's matchup - SINGLE PATH ONLY
     useEffect(() => {
-        const loadTodaysMatchup = async () => {
+        const loadTodaysGame = async () => {
+            console.log('🎮 LOADING GAME - SINGLE PATH');
             setMatchupLoading(true);
-            let matchup = null;
             
             try {
-                const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
-                
-                if (needsNewMatchup) {
-                    matchup = await generateEnhancedDailyMatchup(new Date());
-                } else {
-                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
-                }
-                
-                console.log('✅ Successfully loaded matchup:', matchup.homeTeam.name, 'vs', matchup.awayTeam.name);
+                const game = await getTodaysMLBGame();
+                setTodaysMatchup(game);
+                setIsInitialized(true);
+                console.log('✅ GAME LOADED SUCCESSFULLY:', game.homeTeam.name, 'vs', game.awayTeam.name);
                 
             } catch (error) {
-                console.error('❌ Matchup loading failed, using emergency fallback:', error);
-                
-                // Emergency fallback
-                matchup = {
-                    id: 'emergency-game',
-                    homeTeam: { name: 'Athletics', abbr: 'OAK', logo: '⚾', colors: ['00843D', 'EFB21E'] },
-                    awayTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
-                    sport: 'MLB',
-                    venue: 'Oakland Coliseum',
-                    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-                    status: 'upcoming'
-                };
+                console.error('❌ GAME LOADING FAILED:', error.message);
+                setTodaysMatchup(null); // NULL = NO GAME, SHOW ERROR
+                setIsInitialized(true);
             }
             
-            // Always set a matchup (either real or emergency)
-            setTodaysMatchup(matchup);
             setMatchupLoading(false);
-            setIsInitialized(true);
         };
-
-        loadTodaysMatchup();
-    }, [today, userState.lastPickDate]);
+        
+        loadTodaysGame();
+    }, []); // NO DEPENDENCIES - LOAD ONCE
 
 
     // Determine if user has picked today (only if todaysMatchup is available)
@@ -2311,146 +1714,44 @@ const App = ({ user }) => {
 
     // Game timer state
     useEffect(() => {
-        // Early validation
-        if (!todaysMatchup || !todaysMatchup.startTime) {
-            setTimeLeft('Loading...');
+        if (!todaysMatchup?.startTime) {
+            setTimeLeft('No game time');
             return;
         }
-
-        // ROBUST DATE PARSING - try multiple approaches
-        let gameTime = null;
-
-        // Approach 1: If it's already a Date object
-        if (todaysMatchup.startTime instanceof Date) {
-            if (!isNaN(todaysMatchup.startTime.getTime())) {
-                gameTime = todaysMatchup.startTime;
-            }
-        }
-
-        // Approach 2: Try basic new Date()
-        if (!gameTime) {
-            try {
-                const basicDate = new Date(todaysMatchup.startTime);
-                if (!isNaN(basicDate.getTime())) {
-                    gameTime = basicDate;
-                }
-            } catch (e) {
-                console.error('Timer: Basic new Date() failed:', e);
-            }
-        }
-
-        // Approach 3: Try Date.parse()
-        if (!gameTime) {
-            try {
-                const timestamp = Date.parse(todaysMatchup.startTime);
-                if (!isNaN(timestamp)) {
-                    gameTime = new Date(timestamp);
-                }
-            } catch (e) {
-                console.error('Timer: Date.parse() failed:', e);
-            }
-        }
-
-        // Approach 4: Emergency fallback
-        if (!gameTime) {
-            console.error('Timer: All date parsing failed, using fallback');
-            // Create a game time 2 hours from now
-            gameTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-            setTimeLeft('Fallback time used');
-        }
-
-        let animationFrame;
-        let lastUpdate = 0;
-        let isComponentMounted = true;
-
-        const updateTimer = (timestamp) => {
-            if (!isComponentMounted) return;
-            
-            // Throttle updates
-            if (timestamp - lastUpdate >= 1000) {
-                try {
-                    const now = Date.now();
-                    const gameTimeMs = gameTime.getTime();
-                    
-                    // Validate timestamps
-                    if (isNaN(now) || isNaN(gameTimeMs)) {
-                        console.error('Timer: Invalid timestamps', { now, gameTimeMs });
-                        setTimeLeft('Timer error');
-                        return;
-                    }
-
-                    const distance = gameTimeMs - now;
-
-                    if (distance < 0) {
-                        setGameStarted(true);
-                        setTimeLeft('Game Started!');
-                        return;
-                    }
-
-                    // Safe math calculations
-                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-                    // Validate calculations
-                    if (isNaN(days) || isNaN(hours) || isNaN(minutes) || isNaN(seconds)) {
-                        console.error('Timer: NaN in calculations', { distance, days, hours, minutes, seconds });
-                        setTimeLeft('Calculation error');
-                        return;
-                    }
-
-                    // Format time string
-                    let timeString = '';
-                    if (days > 0) {
-                        timeString = `${days}d ${hours}h ${minutes}m`;
-                    } else if (hours > 0) {
-                        timeString = `${hours}h ${minutes}m ${seconds}s`;
-                    } else if (minutes > 0) {
-                        timeString = `${minutes}m ${seconds}s`;
-                    } else {
-                        timeString = `${seconds}s`;
-                    }
-
-                    setTimeLeft(timeString);
-                    lastUpdate = timestamp;
-
-                } catch (error) {
-                    console.error('Timer calculation error:', error);
-                    setTimeLeft('Timer error');
-                    return;
-                }
-            }
-
-            // Continue animation loop
-            if (isComponentMounted) {
-                animationFrame = requestAnimationFrame(updateTimer);
-            }
-        };
-
-        // Handle visibility changes
-        const handleVisibilityChange = () => {
-            if (!document.hidden && isComponentMounted) {
-                lastUpdate = 0;
-                animationFrame = requestAnimationFrame(updateTimer);
-            } else if (animationFrame) {
-                cancelAnimationFrame(animationFrame);
-            }
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
         
-        // Initial update
-        animationFrame = requestAnimationFrame(updateTimer);
-
-        return () => {
-            isComponentMounted = false;
-            if (animationFrame) {
-                cancelAnimationFrame(animationFrame);
+        const gameTime = new Date(todaysMatchup.startTime);
+        
+        if (isNaN(gameTime.getTime())) {
+            setTimeLeft('Invalid time');
+            return;
+        }
+        
+        const updateTimer = () => {
+            const now = new Date();
+            const diff = gameTime - now;
+            
+            if (diff <= 0) {
+                setGameStarted(true);
+                setTimeLeft('Game Started');
+                return;
             }
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            if (hours > 0) {
+                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+            } else {
+                setTimeLeft(`${minutes}m ${seconds}s`);
+            }
         };
-    }, [todaysMatchup?.startTime]); // Depend on startTime specifically
+        
+        updateTimer(); // Initial call
+        const interval = setInterval(updateTimer, 1000);
+        
+        return () => clearInterval(interval);
+    }, [todaysMatchup?.startTime]);
 
 
     /**
@@ -2626,51 +1927,19 @@ const App = ({ user }) => {
         }));
 
         const pickedTeamName = teamChoice === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name;
-        // Check if the matchup ID starts with 'fallback-' to determine data source
-        const isRealGame = !todaysMatchup.id.startsWith('emergency-fallback'); // Changed to match the new emergency fallback ID
 
         // Show immediate confirmation
         addNotification({
             type: 'info',
-            message: `You picked: ${pickedTeamName}. ${isRealGame ? '📡 Real result will be checked after the game!' : '🎮 Simulated result in 30 seconds.'}`
+            message: `You picked: ${pickedTeamName}. 📡 Real result will be checked after the game!`
         });
 
         playSound('pick_select');
 
-        // Use real result checking for real games, simulation for fallback games
-        if (isRealGame) {
-            checkRealResult(newPick, todaysMatchup);
-        } else {
-            // Keep simulation for fallback games
-            setTimeout(() => {
-                const isCorrect = Math.random() > 0.5; // Simulate random result for fallback games
-                setIsStreakIncreasing(isCorrect); // Set for animation
-                setUserState(prev => {
-                    const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
-                    const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-                    return {
-                        ...prev,
-                        correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                        currentStreak: newCurrentStreak,
-                        bestStreak: newBestStreak,
-                        weeklyStats: {
-                            ...prev.weeklyStats,
-                            correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0)
-                        }
-                    };
-                });
+        // Always check real result since we only load real MLB games now
+        checkRealResult(newPick, todaysMatchup);
 
-                addNotification({
-                    type: isCorrect ? 'success' : 'error',
-                    message: isCorrect ? `🎉 Correct! Streak: ${userState.currentStreak + 1}` : `😞 Wrong! Streak reset.`
-                });
-
-                playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
-                setTimeout(() => setIsStreakIncreasing(false), 1500);
-            }, 30000); // 30 second delay for simulated game result
-        }
-
-    }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult, userState.currentStreak]);
+    }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult]);
 
 
     const handleToggleTheme = useCallback(() => {
@@ -2799,24 +2068,6 @@ const App = ({ user }) => {
                         border-top-color: var(--accent-info);
                         animation: spin 1.2s linear infinite;
                     }
-                    /* ADDED GLOBAL DESKTOP-ONLY CSS */
-                    * {
-                        -webkit-touch-callout: none !important;
-                        -webkit-user-select: none !important;
-                        -webkit-tap-highlight-color: transparent !important;
-                        touch-action: none !important;
-                    }
-
-                    body {
-                        min-width: 1200px !important;
-                        overflow-x: auto !important;
-                    }
-
-                    .team-card {
-                        width: 200px !important;
-                        height: 160px !important;
-                        /* Fixed desktop dimensions */
-                    }
                     `}
                 </style>
                 <div className="text-center">
@@ -2827,7 +2078,8 @@ const App = ({ user }) => {
         );
     }
 
-    if (!todaysMatchup) {
+    // CLEAN ERROR STATE - NO FALLBACKS
+    if (!matchupLoading && !todaysMatchup) {
         return (
             <div className="min-h-screen bg-bg-primary text-text-primary flex items-center justify-center">
                 <style>
@@ -2840,7 +2092,10 @@ const App = ({ user }) => {
                         --bg-tertiary: #e2e8f0;
                         --text-primary: #1e293b;
                         --text-secondary: #64748b;
-                        --accent-info: #3b82f6; /* Defined here for loading state */
+                        --accent-info: #3b82f6;
+                        --accent-win: #22c55e;
+                        --success: #10b981;
+                        --error: #ef4444;
                     }
                     .dark {
                         --bg-primary: #0a0a0a;
@@ -2849,29 +2104,19 @@ const App = ({ user }) => {
                         --text-primary: #ffffff;
                         --text-secondary: #a0a0a0;
                     }
-                    /* ADDED GLOBAL DESKTOP-ONLY CSS */
-                    * {
-                        -webkit-touch-callout: none !important;
-                        -webkit-user-select: none !important;
-                        -webkit-tap-highlight-color: transparent !important;
-                        touch-action: none !important;
-                    }
-
-                    body {
-                        min-width: 1200px !important;
-                        overflow-x: auto !important;
-                    }
-
-                    .team-card {
-                        width: 200px !important;
-                        height: 160px !important;
-                        /* Fixed desktop dimensions */
-                    }
                     `}
                 </style>
-                <div className="text-center">
-                    <p>No matchup available</p>
-                    <button onClick={() => window.location.reload()}>Refresh</button>
+                <div className="text-center p-6">
+                    <h2 className="text-2xl font-bold mb-4">No Games Available</h2>
+                    <p className="text-text-secondary mb-6">
+                        No MLB games found for today. This could mean it's an off-day or there's an API issue.
+                    </p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg"
+                    >
+                        Retry Loading
+                    </button>
                 </div>
             </div>
         );
@@ -2956,64 +2201,23 @@ const App = ({ user }) => {
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
                 body { margin: 0; padding: 0; overflow-x: hidden; }
                 
-                /* PROFESSIONAL DESIGN SYSTEM: Production-grade variables */
+                /* FORCE CONSISTENT COLORS EVERYWHERE */
                 :root {
-                    /* Enhanced color palette (default light mode) */
                     --bg-primary: #ffffff;
                     --bg-secondary: #f8fafc;
                     --bg-tertiary: #e2e8f0;
-                    --bg-quaternary: #cbd5e1;
-                    
-                    /* Semantic colors */
-                    --success: #10b981;
-                    --success-light: #6ee7b7;
-                    --error: #ef4444;
-                    --error-light: #fca5a5;
-                    --warning: #f59e0b;
-                    --info: #3b82f6;
-                    --info-light: #93c5fd;
-                    
-                    /* Typography */
-                    --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
-                    --font-mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-                    
-                    /* Spacing scale */
-                    --space-xs: 0.25rem;
-                    --space-sm: 0.5rem;
-                    --space-md: 1rem;
-                    --space-lg: 1.5rem;
-                    --space-xl: 2rem;
-                    --space-2xl: 3rem;
-                    
-                    /* Border radius scale */
-                    --radius-sm: 0.375rem;
-                    --radius-md: 0.5rem;
-                    --radius-lg: 0.75rem;
-                    --radius-xl: 1rem;
-                    --radius-2xl: 1.5rem;
-                    
-                    /* Shadows */
-                    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-                    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    --shadow-xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)';
-                    
-                    /* Transitions */
-                    --transition-fast: 150ms ease-out;
-                    --transition-normal: 250ms ease-out;
-                    --transition-slow: 400ms ease-out;
-
-                    /* Text colors for default (light) theme */
                     --text-primary: #1e293b;
                     --text-secondary: #64748b;
+                    --accent-info: #3b82f6;
+                    --accent-win: #22c55e;
+                    --success: #10b981;
+                    --error: #ef4444;
                 }
 
                 .dark {
-                    /* Dark mode overrides */
                     --bg-primary: #0a0a0a;
                     --bg-secondary: #1a1a1a;
                     --bg-tertiary: #2a2a2a;
-                    --bg-quaternary: #404040;
                     --text-primary: #ffffff;
                     --text-secondary: #a0a0a0;
                 }
@@ -3146,9 +2350,26 @@ const App = ({ user }) => {
                     animation: pulse-success 2s infinite;
                 }
 
-                /* REMOVED MOBILE OPTIMIZATIONS MEDIA QUERIES */
-                /* @media (max-width: 640px) { ... } */
-                
+                /* MOBILE OPTIMIZATIONS */
+                @media (max-width: 640px) {
+                    .team-selection-container {
+                        grid-template-columns: 1fr 50px 1fr;
+                        gap: var(--space-md);
+                        padding: var(--space-md);
+                    }
+                    
+                    .team-card {
+                        min-height: 140px;
+                        padding: var(--space-md);
+                    }
+                    
+                    .vs-divider {
+                        width: 50px;
+                        height: 50px;
+                        font-size: 1rem;
+                    }
+                }
+
                 /* LOADING STATES */
                 .loading-shimmer {
                     background: linear-gradient(90deg, 
@@ -3317,14 +2538,31 @@ const App = ({ user }) => {
                 70% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0); }
                 }
 
+                /* Mobile timer and date fixes */
+                @media (max-width: 640px) {
+                    .team-selection-container {
+                        grid-template-columns: 1fr 50px 1fr;
+                        gap: var(--space-md);
+                        padding: var(--space-md);
+                    }
+                    
+                    .team-card {
+                        min-height: 140px;
+                        padding: var(--space-md);
+                    }
+                    
+                    .vs-divider {
+                        width: 50px;
+                        height: 50px;
+                        font-size: 1rem;
+                    }
+                }
+
                 `}
             </style>
-            {/* STEP 1: Add Desktop-Only Viewport Meta Tag */}
-            <meta name="viewport" content="width=1200, initial-scale=0.3, maximum-scale=1.0, user-scalable=yes"></meta>
             <script src="https://cdn.tailwindcss.com"></script>
 
-            {/* STEP 5: Force Desktop Layout - width and mx-auto */}
-            <div className="w-[480px] mx-auto animate-fadeInUp">
+            <div className="max-w-md mx-auto w-full animate-fadeInUp">
 
                 {/* Enhanced Header - Streak Display & Rank */}
                 <EnhancedHeader
@@ -3339,9 +2577,9 @@ const App = ({ user }) => {
                         <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
                             {todaysMatchup.sport}
                         </span>
-                        {/* Optional: Show data source */}
+                        {/* Data source will always be live now */}
                         <span className="text-xs text-text-secondary">
-                            {todaysMatchup.id?.includes('emergency-fallback') ? '🎮 Sim' : '📡 Live'}
+                            📡 Live
                         </span>
                         <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
                     </div>
@@ -3422,7 +2660,6 @@ const App = ({ user }) => {
 
 
                 {/* Simple Stats */}
-                {/* STEP 5: Force Desktop Layout - Always desktop grid */}
                 <div className="grid grid-cols-3 gap-4 text-center mb-6">
                     <div className="bg-bg-secondary rounded-xl p-4 shadow-md border border-bg-tertiary">
                         <div className="text-2xl font-bold text-accent-info">{userState.totalPicks}</div>
@@ -3445,14 +2682,14 @@ const App = ({ user }) => {
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
                         <button
                             onClick={handleToggleTheme}
-                            className="p-3 px-3 rounded-full bg-accent-info text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 sm:p-2 px-3 rounded-full bg-accent-info text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label={`Toggle theme, current is ${userState.theme}`}
                         >
                             {userState.theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
                         </button>
                         <button
                             onClick={() => handleToggleSound()}
-                            className={`p-3 px-3 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm
+                            className={`p-3 sm:p-2 px-3 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm
                                 ${userState.soundEnabled ? 'bg-accent-win text-white' : 'bg-gray-500 text-white'}
                             `}
                             aria-label={`Toggle sound effects, currently ${userState.soundEnabled ? 'on' : 'off'}`}
@@ -3464,7 +2701,7 @@ const App = ({ user }) => {
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
                         <button
                             onClick={() => setShowShareModal(true)}
-                            className="p-3 px-3 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 sm:p-2 px-3 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label="Share the app"
                         >
                             📱 Share
@@ -3487,7 +2724,7 @@ const App = ({ user }) => {
                                     window.location.reload();
                                 }
                             }}
-                            className="p-3 px-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="p-3 sm:p-2 px-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
                             aria-label="Logout from Whop account"
                         >
                             🚪 Logout
@@ -3498,7 +2735,7 @@ const App = ({ user }) => {
 
             {/* Floating Notifications */}
             {notifications.length > 0 && (
-                <div className="fixed top-4 right-4 z-50 w-full w-[480px] p-2 animate-slideInRight"> {/* Fixed width to match desktop */}
+                <div className="fixed top-4 right-4 z-50 w-full max-w-xs p-2 animate-slideInRight">
                     <div className={`${notifications[notifications.length - 1].type === 'success' ? 'bg-green-600' :
                         notifications[notifications.length - 1].type === 'error' ? 'bg-red-600' :
                         notifications[notifications.length - 1].type === 'warning' ? 'bg-yellow-600' :
@@ -3629,3 +2866,4 @@ export default function Page() {
         </div>
     );
 }
+
