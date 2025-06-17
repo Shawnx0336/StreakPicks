@@ -198,8 +198,21 @@ body {
     transform: none; /* Remove hover transform when disabled */
 }
 
+/* Team Logo Styling */
 .team-card .team-logo {
-    font-size: 3.5rem; /* Adjusted for better fit on card */
+    font-size: 3.5rem; /* Adjusted for better fit on card (for emoji) */
+    width: 64px; /* Explicit width for logo container */
+    height: 64px; /* Explicit height for logo container */
+    display: flex; /* Ensure it's a flex container for centering */
+    align-items: center; /* Center content vertically */
+    justify-content: center; /* Center content horizontally */
+}
+
+.team-card .team-logo img {
+    display: block; /* Ensure the image behaves as a block element */
+    flex-shrink: 0; /* Prevent the image from shrinking */
+    /* width and height are handled by Tailwind classes w-16 h-16 (64px) */
+    /* object-contain is handled by Tailwind class */
 }
 
 .team-card .team-name {
