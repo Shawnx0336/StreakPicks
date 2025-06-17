@@ -385,67 +385,131 @@ const getTodaysMLBGame = async () => {
 const fetchMLBGameResult = async (gameId, sport) => {
     try {
         console.log(`Fetching MLB game result for game ${gameId}`);
-                
-        // Use CORS proxy - FIXED!
+        
+        // Use CORS proxy
         const proxyUrl = 'https://api.allorigins.win/raw?url=';
         const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
         const response = await fetch(proxyUrl + encodeURIComponent(gameUrl));
-                
+        
         if (!response.ok) {
             throw new Error(`Proxy returned ${response.status}`);
         }
-                
+        
         const data = await response.json();
-                
-        // Check if game is completed
-        const gameData = data.gameData;
-        const liveData = data.liveData;
-                
-        if (!gameData || !liveData) {
-            throw new Error('Invalid game data structure');
+        
+        // 🔍 DEBUG: Log the actual structure we're getting
+        console.log('📥 Raw game data structure:', {
+            hasGameData: !!data.gameData,
+            hasLiveData: !!data.liveData,
+            topLevelKeys: Object.keys(data),
+            gameDataKeys: data.gameData ? Object.keys(data.gameData) : 'missing',
+            liveDataKeys: data.liveData ? Object.keys(data.liveData) : 'missing'
+        });
+        
+        // ✅ IMPROVED: More flexible structure checking
+        if (!data) {
+            throw new Error('No data received from API');
         }
-                
-        const gameStatus = gameData.status.statusCode;
-        if (gameStatus !== 'F' && gameStatus !== 'O') { // F = Final, O = Official
-            console.log(`Game ${gameId} not finished yet. Status: ${gameData.status.detailedState}`);
+        
+        // Check for game completion using multiple possible paths
+        let gameStatus = null;
+        let gameStatusText = '';
+        
+        // Try different possible status locations
+        if (data.gameData?.status?.statusCode) {
+            gameStatus = data.gameData.status.statusCode;
+            gameStatusText = data.gameData.status.detailedState || '';
+        } else if (data.status?.statusCode) {
+            gameStatus = data.status.statusCode;
+            gameStatusText = data.status.detailedState || '';
+        } else {
+            console.log('❌ Could not find game status in response');
+            console.log('Available data keys:', Object.keys(data));
             return null;
         }
-                
-        // Extract final scores
-        const homeScore = liveData.linescore?.teams?.home?.runs || 0;
-        const awayScore = liveData.linescore?.teams?.away?.runs || 0;
-                
+        
+        // Check if game is finished
+        if (gameStatus !== 'F' && gameStatus !== 'O') {
+            console.log(`Game ${gameId} not finished yet. Status: ${gameStatus} - ${gameStatusText}`);
+            return null;
+        }
+        
+        // ✅ IMPROVED: More flexible score extraction
+        let homeScore = 0;
+        let awayScore = 0;
+        
+        // Try multiple possible score locations
+        if (data.liveData?.linescore?.teams) {
+            homeScore = data.liveData.linescore.teams.home?.runs || 0;
+            awayScore = data.liveData.linescore.teams.away?.runs || 0;
+        } else if (data.linescore?.teams) {
+            homeScore = data.linescore.teams.home?.runs || 0;
+            awayScore = data.linescore.teams.away?.runs || 0;
+        } else if (data.teams) {
+            // Sometimes scores are directly in teams object
+            homeScore = data.teams.home?.score || data.teams.home?.runs || 0;
+            awayScore = data.teams.away?.score || data.teams.away?.runs || 0;
+        } else {
+            console.log('❌ Could not find scores in response');
+            console.log('Available liveData keys:', data.liveData ? Object.keys(data.liveData) : 'no liveData');
+            return null;
+        }
+        
+        // Determine winner
         let winner = null;
         if (homeScore > awayScore) {
             winner = 'home';
         } else if (awayScore > homeScore) {
             winner = 'away';
         } else {
-            winner = 'tie'; // Very rare in baseball
+            winner = 'tie';
         }
-                
-        const homeTeam = gameData.teams.home;
-        const awayTeam = gameData.teams.away;
-                
-        return {
+        
+        // ✅ IMPROVED: More flexible team data extraction
+        let homeTeam, awayTeam;
+        
+        if (data.gameData?.teams) {
+            homeTeam = data.gameData.teams.home;
+            awayTeam = data.gameData.teams.away;
+        } else if (data.teams) {
+            homeTeam = data.teams.home;
+            awayTeam = data.teams.away;
+        } else {
+            console.log('❌ Could not find team data in response');
+            return null;
+        }
+        
+        const result = {
             gameId: gameId,
             status: 'completed',
             homeScore: homeScore,
             awayScore: awayScore,
             winner: winner,
             homeTeam: {
-                name: homeTeam.name,
-                abbreviation: homeTeam.abbreviation,
+                name: homeTeam.team?.name || homeTeam.name || 'Home Team',
+                abbreviation: homeTeam.team?.abbreviation || homeTeam.abbreviation || 'HOME',
                 score: homeScore
             },
             awayTeam: {
-                name: awayTeam.name,
-                abbreviation: awayTeam.abbreviation,
+                name: awayTeam.team?.name || awayTeam.name || 'Away Team',
+                abbreviation: awayTeam.team?.abbreviation || awayTeam.abbreviation || 'AWAY',
                 score: awayScore
             },
             completedAt: new Date(),
-            rawGameData: data
-        };            
+            rawGameData: data // Keep for debugging
+        };
+        
+        console.log('✅ Successfully parsed game result:', {
+            gameId,
+            homeScore,
+            awayScore,
+            winner,
+            homeTeam: result.homeTeam.name,
+            awayTeam: result.awayTeam.name
+        });
+        
+        return result;
+        
     } catch (error) {
         console.error(`Error fetching MLB game result for ${gameId}:`, error);
         return null;
@@ -1884,7 +1948,7 @@ const App = ({ user }) => {
                         {
                             gameId: userState.todaysPick.matchupId,
                             userPick: userState.todaysPick.selectedTeam,
-                            actualWinner: result.winner, 
+                            actualWinner: result.winner,
                             isCorrect: isCorrect,
                             finalScore: `${result.homeScore}-${result.awayScore}`,
                             checkedAt: new Date().toISOString(),
@@ -1904,12 +1968,12 @@ const App = ({ user }) => {
 
                     setTimeout(() => setIsStreakIncreasing(false), 1500);
                 }
-            } catch (error) {
-                console.error('Error fetching game result for display:', error);
-                addNotification({ type: 'error', message: 'Failed to fetch game result.' });
-            } finally {
-                setResultLoading(false);
             }
+        } catch (error) {
+            console.error('Error fetching game result for display:', error);
+            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
+        } finally {
+            setResultLoading(false);
         }
     }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, setUserState, setGameResults, addNotification, playSound]);
 
