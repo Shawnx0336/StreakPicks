@@ -74,7 +74,7 @@ const useWhop = () => {
                 setIsAuthenticated(false);
                 setHasAccess(false);
             } finally {
-                setIsLoading(false); // Set loading to false once check is complete
+                setLoading(false); // Set loading to false once check is complete
             }
         };
 
@@ -305,12 +305,20 @@ const getMLBTeamColors = (abbr) => {
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
     // Removed platform-specific logging details as per "no platform detection" rule
-    console.log('✨ Environment Info:', {
-        todayDate: new Date().toISOString().split('T')[0],
-        currentTime: new Date().toISOString()
+    
+    // ✅ CRITICAL FIX: Use local date, not UTC for API query
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${day}`;
+
+    console.log('📅 Date Info:', {
+        localDate: today,
+        userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        currentTime: now.toLocaleString()
     });
     
-    const today = new Date().toISOString().split('T')[0]; // Simple and universal date
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
     
     console.log('📡 Fetching from:', apiUrl);
@@ -476,8 +484,9 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
             if (keyPrefix === 'streakPickemUser') {
                 let updatedParsedItem = { ...parsedItem };
                 
-                // FORCE consistent date comparison using simple ISO string
-                const currentDate = new Date().toISOString().split('T')[0];
+                // FORCE consistent date comparison using local date
+                const now = new Date();
+                const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
                 const storedDate = updatedParsedItem.lastPickDate;
                 
                 console.log('Date comparison for reset:', { currentDate, storedDate, different: storedDate !== currentDate });
@@ -875,7 +884,6 @@ const handleNativeShare = async (text, url = '', title = 'Streak Pick\'em') => {
         document.execCommand('copy', false, fullText); // Use document.execCommand for broader compatibility in iframes
         return true;
     } catch (error) {
-        // Final fallback: Manual copy (not typically necessary as clipboard should work)
         console.error('Clipboard access failed:', error);
         return false;
     }
@@ -1206,18 +1214,24 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
             <div className="text-5xl mb-2 team-logo">
                 {team.logo}
             </div>
-            <div className="font-bold text-lg text-text-primary mb-1 team-abbr"> {/* Changed to team-abbr from team-name */}
+            <div className="font-bold text-lg text-text-primary mb-1 team-abbr">
                 {team.abbr}
             </div>
             <div className="text-sm text-text-secondary team-name-full">
                 {team.name}
             </div>
 
-            {/* Color accent bar */}
+            {/* ✅ ENHANCED Color accent bar with REAL team colors */}
             <div
                 className="color-accent"
                 style={{
-                    background: `linear-gradient(90deg, #${primaryColor}, #${secondaryColor})`
+                    background: `linear-gradient(90deg, #${primaryColor}, #${secondaryColor})`,
+                    height: '4px',
+                    width: '100%',
+                    position: 'absolute',
+                    bottom: '0',
+                    left: '0',
+                    borderRadius: '0 0 var(--radius-xl) var(--radius-xl)'
                 }}
             />
         </button>
@@ -1641,9 +1655,11 @@ const App = ({ user }) => {
     const { playSound } = useSound(userState.soundEnabled);
     const { addNotification, notifications, dismissNotification } = useNotifications();
 
-    // Use simple, universal date string for comparison
-    const today = new Date().toISOString().split('T')[0]; 
-    const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based
+    // Use local date for comparison
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based, which is fine for week start
+
 
     const [todaysMatchup, setTodaysMatchup] = useState(null);
     const [matchupLoading, setMatchupLoading] = useState(true);
@@ -1766,134 +1782,132 @@ const App = ({ user }) => {
      */
     const checkRealResult = useCallback(async (pick, matchup, attempt = 1) => {
         const MAX_ATTEMPTS = 3; // Retry up to 3 times
-        const RETRY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour between retries
+        const RETRY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour between retries (for subsequent checks)
 
-        // Estimate game duration (sport-specific)
-        const gameDurations = {
-            'MLB': 3 * 60 * 60 * 1000,    // 3 hours
-            'NBA': 2.5 * 60 * 60 * 1000,  // 2.5 hours
-            'NFL': 3.5 * 60 * 60 * 1000,  // 3.5 hours
-            'NHL': 2.5 * 60 * 60 * 1000,  // 2.5 hours
-            'Soccer': 2 * 60 * 60 * 1000, // 2 hours
-            'NCAAB': 2 * 60 * 60 * 1000 // 2 hours
-        };
-
-        const estimatedGameDuration = gameDurations[matchup.sport] || 3 * 60 * 60 * 1000;
-        const estimatedEndTime = new Date(new Date(matchup.startTime).getTime() + estimatedGameDuration);
-
-        // Calculate delay: check 30 minutes after estimated end time (minimum 5 seconds for first check)
+        const gameStartTime = new Date(matchup.startTime);
         const now = new Date();
-        const checkTime = new Date(estimatedEndTime.getTime() + 30 * 60 * 1000);
-        const initialDelayMs = Math.max(checkTime.getTime() - now.getTime(), 5000);
+        
+        // If game hasn't started yet, wait until 30 minutes after start time
+        if (gameStartTime > now) {
+            const delayMs = (gameStartTime.getTime() - now.getTime()) + (30 * 60 * 1000); // 30 mins after start
+            console.log(`⏰ Game starts at ${gameStartTime.toLocaleString()}, will check result in ${Math.round(delayMs/1000/60)} minutes`);
+            
+            setTimeout(() => checkRealResult(pick, matchup, attempt), delayMs);
+            return;
+        }
+        
+        // Game should be finished or ongoing, check now
+        console.log(`🔍 Checking game result immediately for game ${pick.matchupId} (Attempt ${attempt})...`);
 
-        // Use initialDelayMs for the first attempt, then RETRY_INTERVAL_MS for subsequent
-        const delayForThisAttempt = attempt === 1 ? initialDelayMs : RETRY_INTERVAL_MS;
+        try {
+            let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
 
-        console.log(`Will check result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr} (Attempt ${attempt}) in ${Math.round(delayForThisAttempt / 1000 / 60)} minutes.`);
-
-        setTimeout(async () => {
-            try {
-                console.log(`Checking result for game ${pick.matchupId} (Attempt ${attempt})...`);
-
-                let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
-
-                if (!gameResult) {
-                    if (attempt < MAX_ATTEMPTS) {
-                        console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
-                        // Schedule next attempt recursively
-                        checkRealResult(pick, matchup, attempt + 1);
-                        return;
-                    } else {
-                        console.log(`Max retry attempts (${MAX_ATTEMPTS}) reached for game ${pick.matchupId}. Result unavailable.`);
-                        addNotification({
-                            type: 'warning',
-                            message: `Could not get result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-                        });
-                        return;
-                    }
-                }
-
-                // Determine if user's pick was correct
-                const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
-                const actualWinner = gameResult.winner; // 'home', 'away', or 'tie'
-
-                let isCorrect = false;
-                let resultMessage = '';
-
-                if (actualWinner === 'tie') {
-                    // Handle ties - could be considered correct, or push (no win/loss)
-                    isCorrect = true; // For now, treat ties as wins to avoid frustrating users
-                    resultMessage = `🤝 Tie Game! ${gameResult.homeTeam.abbreviation} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}. Streak continues!`;
-                } else if (userPickedTeam === actualWinner) {
-                    isCorrect = true;
-                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
-                    resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak: ${userState.currentStreak + 1}!`;
+            if (!gameResult) {
+                if (attempt < MAX_ATTEMPTS) {
+                    console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
+                    // Schedule next attempt recursively
+                    setTimeout(() => checkRealResult(pick, matchup, attempt + 1), RETRY_INTERVAL_MS);
+                    return;
                 } else {
-                    isCorrect = false;
-                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
-                    const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
-                    resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak reset.`;
+                    console.log(`Max retry attempts (${MAX_ATTEMPTS}) reached for game ${pick.matchupId}. Result unavailable.`);
+                    addNotification({
+                        type: 'warning',
+                        message: `Could not get result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
+                    });
+                    return;
                 }
-
-                setIsStreakIncreasing(isCorrect); // Set for animation
-
-                // Update user state with real result
-                setUserState(prev => {
-                    const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
-                    const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-
-                    return {
-                        ...prev,
-                        correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                        currentStreak: newCurrentStreak,
-                        bestStreak: newBestStreak,
-                        weeklyStats: {
-                            ...prev.weeklyStats,
-                            correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
-                            picks: prev.weeklyStats.picks + 1 // Increment weekly picks too
-                        }
-                    };
-                });
-
-                // Store game result history
-                setGameResults(prev => [
-                    ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
-                    {
-                        gameId: pick.matchupId,
-                        userPick: pick.selectedTeam,
-                        actualWinner: gameResult.winner,
-                        isCorrect: isCorrect,
-                        finalScore: `${gameResult.homeScore}-${gameResult.awayScore}`,
-                        checkedAt: new Date().toISOString(),
-                        gameDate: matchup.startTime // startTime is already ISO string
-                    }
-                ]);
-
-                // Show result notification
-                addNotification({
-                    type: isCorrect ? 'success' : 'error',
-                    message: resultMessage
-                });
-
-                playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
-
-                // Log for debugging
-                console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
-                console.log(`Game: ${gameResult.homeTeam.name} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}`); // Fixed: Display away team abbr
-
-            } catch (error) {
-                console.error('Error processing game result:', error);
-                // Fallback: don't update streak, just notify user
-                addNotification({
-                    type: 'warning',
-                    message: `Error verifying result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-                });
-            } finally {
-                // Ensure streak increasing state is reset after a brief period
-                setTimeout(() => setIsStreakIncreasing(false), 1500);
             }
-        }, delayForThisAttempt);
 
+            // Determine if user's pick was correct
+            const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
+            const actualWinner = gameResult.winner; // 'home', 'away', or 'tie'
+
+            let isCorrect = false;
+            let resultMessage = '';
+
+            if (actualWinner === 'tie') {
+                // Handle ties - could be considered correct, or push (no win/loss)
+                isCorrect = true; // For now, treat ties as wins to avoid frustrating users
+                resultMessage = `🤝 Tie Game! ${gameResult.homeTeam.abbreviation} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}. Streak continues!`;
+            } else if (userPickedTeam === actualWinner) {
+                isCorrect = true;
+                const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
+                resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak: ${userState.currentStreak + 1}!`;
+            } else {
+                isCorrect = false;
+                const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
+                const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
+                resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak reset.`;
+            }
+
+            setIsStreakIncreasing(isCorrect); // Set for animation
+
+            // Update user state with real result
+            setUserState(prev => {
+                const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
+                const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
+
+                return {
+                    ...prev,
+                    correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
+                    currentStreak: newCurrentStreak,
+                    bestStreak: newBestStreak,
+                    weeklyStats: {
+                        ...prev.weeklyStats,
+                        correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
+                        picks: prev.weeklyStats.picks + 1 // Increment weekly picks too
+                    }
+                };
+            });
+
+            // ✅ ADDED: Result Verification Logging
+            console.log('📊 STREAK UPDATE SUMMARY:', {
+                userPick: pick.selectedTeam,
+                actualWinner: gameResult.winner,
+                wasCorrect: isCorrect,
+                oldStreak: userState.currentStreak,
+                newStreak: isCorrect ? userState.currentStreak + 1 : 0,
+                gameScore: `${gameResult.homeScore}-${gameResult.awayScore}`
+            });
+
+
+            // Store game result history
+            setGameResults(prev => [
+                ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
+                {
+                    gameId: pick.matchupId,
+                    userPick: pick.selectedTeam,
+                    actualWinner: gameResult.winner,
+                    isCorrect: isCorrect,
+                    finalScore: `${gameResult.homeScore}-${gameResult.awayScore}`,
+                    checkedAt: new Date().toISOString(),
+                    gameDate: matchup.startTime // startTime is already ISO string
+                }
+            ]);
+
+            // Show result notification
+            addNotification({
+                type: isCorrect ? 'success' : 'error',
+                message: resultMessage
+            });
+
+            playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+
+            // Log for debugging
+            console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
+            console.log(`Game: ${gameResult.homeTeam.name} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}`); // Fixed: Display away team abbr
+
+        } catch (error) {
+            console.error('Error processing game result:', error);
+            // Fallback: don't update streak, just notify user
+            addNotification({
+                type: 'warning',
+                message: `Error verifying result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
+            });
+        } finally {
+            // Ensure streak increasing state is reset after a brief period
+            setTimeout(() => setIsStreakIncreasing(false), 1500);
+        }
     }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats]);
 
 
@@ -1932,16 +1946,27 @@ const App = ({ user }) => {
 
         const pickedTeamName = teamChoice === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name;
 
-        // Show immediate confirmation
-        addNotification({
-            type: 'info',
-            message: `You picked: ${pickedTeamName}. 📡 Real result will be checked after the game!`
-        });
+        // ✅ FIXED: Check game ID format before calling checkRealResult
+        const isRealMLBGame = todaysMatchup && todaysMatchup.id && /^\d+$/.test(todaysMatchup.id);
 
-        playSound('pick_select');
-
-        // Always check real result since we only load real MLB games now
-        checkRealResult(newPick, todaysMatchup);
+        if (isRealMLBGame) {
+            console.log('✅ Real MLB game detected, will check actual results');
+            // Show immediate confirmation
+            addNotification({
+                type: 'info',
+                message: `You picked: ${pickedTeamName}. 📡 Real result will be checked after the game!`
+            });
+            playSound('pick_select');
+            checkRealResult(newPick, todaysMatchup);
+        } else {
+            console.log('❌ Invalid game ID format for result checking:', todaysMatchup.id);
+            addNotification({
+                type: 'warning', 
+                message: 'Unable to verify game results due to invalid matchup ID. Your pick has been recorded.'
+            });
+            playSound('button_click'); // Play a neutral sound for un-verifiable pick
+            // No checkRealResult call for invalid IDs, but pick is still recorded.
+        }
 
     }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult]);
 
@@ -2016,7 +2041,7 @@ const App = ({ user }) => {
         if (userState.currentStreak > 0 && milestones.includes(userState.currentStreak)) {
             // Don't spam - only show once per milestone
             const hasSharedThisMilestone = localStorage.getItem(`shared_milestone_${userState.currentStreak}`);
-            if (!hasSharedThisMilestone) {
+            if (!hasSharedThisEaston) {
                 setTimeout(() => {
                     setShowShareModal(true);
                     localStorage.setItem(`shared_milestone_${userState.currentStreak}`, 'true');
@@ -2236,7 +2261,8 @@ const App = ({ user }) => {
                 .matchup-card {
                     background: linear-gradient(135deg, 
                         var(--bg-secondary) 0%, 
-                        color-mix(in srgb, var(--info) 5%, var(--bg-secondary)) 100%
+                        color-mix(in srgb, var(--accent-info) 8%, var(--bg-secondary)) 50%,
+                        var(--bg-secondary) 100%
                     );
                     border: 1px solid color-mix(in srgb, var(--info) 10%, transparent);
                     border-radius: var(--radius-2xl);
@@ -2286,12 +2312,12 @@ const App = ({ user }) => {
                     border: 2px solid var(--bg-tertiary);
                     border-radius: var(--radius-xl);
                     padding: var(--space-lg);
-                    position: relative;
-                    overflow: hidden;
+                    position: relative; /* Added for .color-accent positioning */
+                    overflow: hidden; /* Added for .color-accent border-radius */
                     
                     /* Interactions */
                     cursor: pointer;
-                    transition: all var(--transition-normal);
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Enhanced transition */
                     transform: scale(1);
                     
                     /* Accessibility */
@@ -2304,17 +2330,18 @@ const App = ({ user }) => {
                 }
 
                 .team-card:hover:not(.disabled) {
-                    transform: translateY(-2px) scale(1.02);
+                    transform: translateY(-4px) scale(1.03); /* Enhanced hover effect */
                     border-color: var(--team-primary);
                     box-shadow: 
-                        var(--shadow-xl),
-                        0 0 20px color-mix(in srgb, var(--team-primary) 30%, transparent);
+                        0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                        0 10px 10px -5px rgba(0, 0, 0, 0.04),
+                        0 0 30px var(--team-primary)30; /* Team color glow effect */
                 }
 
                 .team-card.selected {
                     border-color: var(--team-primary);
                     background: linear-gradient(135deg, 
-                        color-mix(in srgb, var(--team-primary) 10%, var(--bg-secondary)), 
+                        var(--team-primary)10, 
                         var(--bg-secondary)
                     );
                     transform: scale(1.02);
@@ -2358,6 +2385,31 @@ const App = ({ user }) => {
 
                 .streak-celebration {
                     animation: pulse-success 2s infinite;
+                }
+
+                /* ✅ Enhanced color accent styling */
+                .color-accent {
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 4px; /* Default height */
+                    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+                    transition: height 0.3s ease;
+                }
+
+                .team-card:hover .color-accent {
+                    height: 6px; /* Slightly taller on hover */
+                }
+
+                /* Pulse animation for selected card */
+                .team-card.selected .color-accent {
+                    animation: colorPulse 2s ease-in-out infinite;
+                }
+
+                @keyframes colorPulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.7; }
                 }
 
                 /* MOBILE OPTIMIZATIONS */
