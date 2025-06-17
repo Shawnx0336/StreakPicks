@@ -385,36 +385,36 @@ const getTodaysMLBGame = async () => {
 const fetchMLBGameResult = async (gameId, sport) => {
     try {
         console.log(`Fetching MLB game result for game ${gameId}`);
-        
+                
         // Use CORS proxy - FIXED!
         const proxyUrl = 'https://api.allorigins.win/raw?url=';
         const gameUrl = `https://statsapi.mlb.com/api/v1/game/${gameId}/feed/live`;
         const response = await fetch(proxyUrl + encodeURIComponent(gameUrl));
-        
+                
         if (!response.ok) {
             throw new Error(`Proxy returned ${response.status}`);
         }
-        
+                
         const data = await response.json();
-        
+                
         // Check if game is completed
         const gameData = data.gameData;
         const liveData = data.liveData;
-        
+                
         if (!gameData || !liveData) {
             throw new Error('Invalid game data structure');
         }
-        
+                
         const gameStatus = gameData.status.statusCode;
         if (gameStatus !== 'F' && gameStatus !== 'O') { // F = Final, O = Official
             console.log(`Game ${gameId} not finished yet. Status: ${gameData.status.detailedState}`);
             return null;
         }
-        
+                
         // Extract final scores
         const homeScore = liveData.linescore?.teams?.home?.runs || 0;
         const awayScore = liveData.linescore?.teams?.away?.runs || 0;
-        
+                
         let winner = null;
         if (homeScore > awayScore) {
             winner = 'home';
@@ -423,10 +423,10 @@ const fetchMLBGameResult = async (gameId, sport) => {
         } else {
             winner = 'tie'; // Very rare in baseball
         }
-        
+                
         const homeTeam = gameData.teams.home;
         const awayTeam = gameData.teams.away;
-        
+                
         return {
             gameId: gameId,
             status: 'completed',
@@ -445,8 +445,7 @@ const fetchMLBGameResult = async (gameId, sport) => {
             },
             completedAt: new Date(),
             rawGameData: data
-        };
-        
+        };            
     } catch (error) {
         console.error(`Error fetching MLB game result for ${gameId}:`, error);
         return null;
@@ -1885,7 +1884,7 @@ const App = ({ user }) => {
                         {
                             gameId: userState.todaysPick.matchupId,
                             userPick: userState.todaysPick.selectedTeam,
-                            actualWinner: result.winner,
+                            actualWinner: result.winner, 
                             isCorrect: isCorrect,
                             finalScore: `${result.homeScore}-${result.awayScore}`,
                             checkedAt: new Date().toISOString(),
@@ -1905,12 +1904,12 @@ const App = ({ user }) => {
 
                     setTimeout(() => setIsStreakIncreasing(false), 1500);
                 }
+            } catch (error) {
+                console.error('Error fetching game result for display:', error);
+                addNotification({ type: 'error', message: 'Failed to fetch game result.' });
+            } finally {
+                setResultLoading(false);
             }
-        } catch (error) {
-            console.error('Error fetching game result for display:', error);
-            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
-        } finally {
-            setResultLoading(false);
         }
     }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, setUserState, setGameResults, addNotification, playSound]);
 
