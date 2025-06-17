@@ -1782,132 +1782,134 @@ const App = ({ user }) => {
      */
     const checkRealResult = useCallback(async (pick, matchup, attempt = 1) => {
         const MAX_ATTEMPTS = 3; // Retry up to 3 times
-        const RETRY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour between retries (for subsequent checks)
+        const RETRY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour between retries
 
-        const gameStartTime = new Date(matchup.startTime);
+        // Estimate game duration (sport-specific)
+        const gameDurations = {
+            'MLB': 3 * 60 * 60 * 1000,    // 3 hours
+            'NBA': 2.5 * 60 * 60 * 1000,  // 2.5 hours
+            'NFL': 3.5 * 60 * 60 * 1000,  // 3.5 hours
+            'NHL': 2.5 * 60 * 60 * 1000,  // 2.5 hours
+            'Soccer': 2 * 60 * 60 * 1000, // 2 hours
+            'NCAAB': 2 * 60 * 60 * 1000 // 2 hours
+        };
+
+        const estimatedGameDuration = gameDurations[matchup.sport] || 3 * 60 * 60 * 1000;
+        const estimatedEndTime = new Date(new Date(matchup.startTime).getTime() + estimatedGameDuration);
+
+        // Calculate delay: check 30 minutes after estimated end time (minimum 5 seconds for first check)
         const now = new Date();
-        
-        // If game hasn't started yet, wait until 30 minutes after start time
-        if (gameStartTime > now) {
-            const delayMs = (gameStartTime.getTime() - now.getTime()) + (30 * 60 * 1000); // 30 mins after start
-            console.log(`⏰ Game starts at ${gameStartTime.toLocaleString()}, will check result in ${Math.round(delayMs/1000/60)} minutes`);
-            
-            setTimeout(() => checkRealResult(pick, matchup, attempt), delayMs);
-            return;
-        }
-        
-        // Game should be finished or ongoing, check now
-        console.log(`🔍 Checking game result immediately for game ${pick.matchupId} (Attempt ${attempt})...`);
+        const checkTime = new Date(estimatedEndTime.getTime() + 30 * 60 * 1000);
+        const initialDelayMs = Math.max(checkTime.getTime() - now.getTime(), 5000);
 
-        try {
-            let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
+        // Use initialDelayMs for the first attempt, then RETRY_INTERVAL_MS for subsequent
+        const delayForThisAttempt = attempt === 1 ? initialDelayMs : RETRY_INTERVAL_MS;
 
-            if (!gameResult) {
-                if (attempt < MAX_ATTEMPTS) {
-                    console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
-                    // Schedule next attempt recursively
-                    setTimeout(() => checkRealResult(pick, matchup, attempt + 1), RETRY_INTERVAL_MS);
-                    return;
-                } else {
-                    console.log(`Max retry attempts (${MAX_ATTEMPTS}) reached for game ${pick.matchupId}. Result unavailable.`);
-                    addNotification({
-                        type: 'warning',
-                        message: `Could not get result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-                    });
-                    return;
-                }
-            }
+        console.log(`Will check result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr} (Attempt ${attempt}) in ${Math.round(delayForThisAttempt / 1000 / 60)} minutes.`);
 
-            // Determine if user's pick was correct
-            const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
-            const actualWinner = gameResult.winner; // 'home', 'away', or 'tie'
+        setTimeout(async () => {
+            try {
+                console.log(`Checking result for game ${pick.matchupId} (Attempt ${attempt})...`);
 
-            let isCorrect = false;
-            let resultMessage = '';
+                let gameResult = await fetchMLBGameResult(pick.matchupId, matchup.sport); 
 
-            if (actualWinner === 'tie') {
-                // Handle ties - could be considered correct, or push (no win/loss)
-                isCorrect = true; // For now, treat ties as wins to avoid frustrating users
-                resultMessage = `🤝 Tie Game! ${gameResult.homeTeam.abbreviation} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}. Streak continues!`;
-            } else if (userPickedTeam === actualWinner) {
-                isCorrect = true;
-                const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
-                resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak: ${userState.currentStreak + 1}!`;
-            } else {
-                isCorrect = false;
-                const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
-                const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
-                resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak reset.`;
-            }
-
-            setIsStreakIncreasing(isCorrect); // Set for animation
-
-            // Update user state with real result
-            setUserState(prev => {
-                const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
-                const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-
-                return {
-                    ...prev,
-                    correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                    currentStreak: newCurrentStreak,
-                    bestStreak: newBestStreak,
-                    weeklyStats: {
-                        ...prev.weeklyStats,
-                        correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
-                        picks: prev.weeklyStats.picks + 1 // Increment weekly picks too
+                if (!gameResult) {
+                    if (attempt < MAX_ATTEMPTS) {
+                        console.log(`Could not fetch game result on attempt ${attempt}, retrying in ${RETRY_INTERVAL_MS / 1000 / 60} minutes.`);
+                        // Schedule next attempt recursively
+                        checkRealResult(pick, matchup, attempt + 1);
+                        return;
+                    } else {
+                        console.log(`Max retry attempts (${MAX_ATTEMPTS}) reached for game ${pick.matchupId}. Result unavailable.`);
+                        addNotification({
+                            type: 'warning',
+                            message: `Could not get result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
+                        });
+                        return;
                     }
-                };
-            });
-
-            // ✅ ADDED: Result Verification Logging
-            console.log('📊 STREAK UPDATE SUMMARY:', {
-                userPick: pick.selectedTeam,
-                actualWinner: gameResult.winner,
-                wasCorrect: isCorrect,
-                oldStreak: userState.currentStreak,
-                newStreak: isCorrect ? userState.currentStreak + 1 : 0,
-                gameScore: `${gameResult.homeScore}-${gameResult.awayScore}`
-            });
-
-
-            // Store game result history
-            setGameResults(prev => [
-                ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
-                {
-                    gameId: pick.matchupId,
-                    userPick: pick.selectedTeam,
-                    actualWinner: gameResult.winner,
-                    isCorrect: isCorrect,
-                    finalScore: `${gameResult.homeScore}-${gameResult.awayScore}`,
-                    checkedAt: new Date().toISOString(),
-                    gameDate: matchup.startTime // startTime is already ISO string
                 }
-            ]);
 
-            // Show result notification
-            addNotification({
-                type: isCorrect ? 'success' : 'error',
-                message: resultMessage
-            });
+                // Determine if user's pick was correct
+                const userPickedTeam = pick.selectedTeam; // 'home' or 'away'
+                const actualWinner = gameResult.winner; // 'home', 'away', or 'tie'
 
-            playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+                let isCorrect = false;
+                let resultMessage = '';
 
-            // Log for debugging
-            console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
-            console.log(`Game: ${gameResult.homeTeam.name} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}`); // Fixed: Display away team abbr
+                if (actualWinner === 'tie') {
+                    // Handle ties - could be considered correct, or push (no win/loss)
+                    isCorrect = true; // For now, treat ties as wins to avoid frustrating users
+                    resultMessage = `🤝 Tie Game! ${gameResult.homeTeam.abbreviation} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}. Streak continues!`;
+                } else if (userPickedTeam === actualWinner) {
+                    isCorrect = true;
+                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
+                    resultMessage = `🎉 Correct! ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak: ${userState.currentStreak + 1}!`;
+                } else {
+                    isCorrect = false;
+                    const winningTeam = actualWinner === 'home' ? gameResult.homeTeam : gameResult.awayTeam;
+                    const userTeamAbbr = userPickedTeam === 'home' ? matchup.homeTeam.abbr : matchup.awayTeam.abbr; // Use matchup team data for user pick display
+                    resultMessage = `😞 Wrong! You picked ${userTeamAbbr}, but ${winningTeam.name} won ${gameResult.homeScore}-${gameResult.awayScore}. Streak reset.`;
+                }
 
-        } catch (error) {
-            console.error('Error processing game result:', error);
-            // Fallback: don't update streak, just notify user
-            addNotification({
-                type: 'warning',
-                message: `Error verifying result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
-            });
-        } finally {
-            // Ensure streak increasing state is reset after a brief period
-            setTimeout(() => setIsStreakIncreasing(false), 1500);
-        }
+                setIsStreakIncreasing(isCorrect); // Set for animation
+
+                // Update user state with real result
+                setUserState(prev => {
+                    const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
+                    const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
+
+                    return {
+                        ...prev,
+                        correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
+                        currentStreak: newCurrentStreak,
+                        bestStreak: newBestStreak,
+                        weeklyStats: {
+                            ...prev.weeklyStats,
+                            correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0),
+                            picks: prev.weeklyStats.picks + 1 // Increment weekly picks too
+                        }
+                    };
+                });
+
+                // Store game result history
+                setGameResults(prev => [
+                    ...prev.slice(-9), // Keep last 10 results (current + 9 previous)
+                    {
+                        gameId: pick.matchupId,
+                        userPick: pick.selectedTeam,
+                        actualWinner: gameResult.winner,
+                        isCorrect: isCorrect,
+                        finalScore: `${gameResult.homeScore}-${gameResult.awayScore}`,
+                        checkedAt: new Date().toISOString(),
+                        gameDate: matchup.startTime // startTime is already ISO string
+                    }
+                ]);
+
+                // Show result notification
+                addNotification({
+                    type: isCorrect ? 'success' : 'error',
+                    message: resultMessage
+                });
+
+                playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+
+                // Log for debugging
+                console.log(`Result processed: ${isCorrect ? 'CORRECT' : 'WRONG'}`);
+                console.log(`Game: ${gameResult.homeTeam.name} ${gameResult.homeScore} - ${gameResult.awayTeam.abbreviation} ${gameResult.awayScore}`); // Fixed: Display away team abbr
+
+            } catch (error) {
+                console.error('Error processing game result:', error);
+                // Fallback: don't update streak, just notify user
+                addNotification({
+                    type: 'warning',
+                    message: `Error verifying result for ${matchup.homeTeam.abbr} vs ${matchup.awayTeam.abbr}. Your streak is unchanged.`
+                });
+            } finally {
+                // Ensure streak increasing state is reset after a brief period
+                setTimeout(() => setIsStreakIncreasing(false), 1500);
+            }
+        }, delayForThisAttempt);
+
     }, [setUserState, addNotification, playSound, userState.currentStreak, setGameResults, userState.weeklyStats]);
 
 
@@ -1946,27 +1948,16 @@ const App = ({ user }) => {
 
         const pickedTeamName = teamChoice === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name;
 
-        // ✅ FIXED: Check game ID format before calling checkRealResult
-        const isRealMLBGame = todaysMatchup && todaysMatchup.id && /^\d+$/.test(todaysMatchup.id);
+        // Show immediate confirmation
+        addNotification({
+            type: 'info',
+            message: `You picked: ${pickedTeamName}. 📡 Real result will be checked after the game!`
+        });
 
-        if (isRealMLBGame) {
-            console.log('✅ Real MLB game detected, will check actual results');
-            // Show immediate confirmation
-            addNotification({
-                type: 'info',
-                message: `You picked: ${pickedTeamName}. 📡 Real result will be checked after the game!`
-            });
-            playSound('pick_select');
-            checkRealResult(newPick, todaysMatchup);
-        } else {
-            console.log('❌ Invalid game ID format for result checking:', todaysMatchup.id);
-            addNotification({
-                type: 'warning', 
-                message: 'Unable to verify game results due to invalid matchup ID. Your pick has been recorded.'
-            });
-            playSound('button_click'); // Play a neutral sound for un-verifiable pick
-            // No checkRealResult call for invalid IDs, but pick is still recorded.
-        }
+        playSound('pick_select');
+
+        // Always check real result since we only load real MLB games now
+        checkRealResult(newPick, todaysMatchup);
 
     }, [hasPickedToday, gameStarted, todaysMatchup, today, setUserState, addNotification, playSound, checkRealResult]);
 
@@ -2041,7 +2032,7 @@ const App = ({ user }) => {
         if (userState.currentStreak > 0 && milestones.includes(userState.currentStreak)) {
             // Don't spam - only show once per milestone
             const hasSharedThisMilestone = localStorage.getItem(`shared_milestone_${userState.currentStreak}`);
-            if (!hasSharedThisEaston) {
+            if (!hasSharedThisMilestone) {
                 setTimeout(() => {
                     setShowShareModal(true);
                     localStorage.setItem(`shared_milestone_${userState.currentStreak}`, 'true');
