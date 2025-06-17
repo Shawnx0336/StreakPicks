@@ -152,13 +152,19 @@ const useWhop = () => {
  * @property {number} bestStreak - All-time best consecutive correct picks.
  * @property {number} totalPicks - Total picks made.
  * @property {number} correctPicks - Total correct picks.
- * @property {Object} todaysPicks - Object: { gameId: { selectedTeam, timestamp, date, status: 'pending' | 'correct' | 'wrong' }, ... }
+ * @property {Object | null} todaysPick - Details of today's pick: { matchupId, selectedTeam, timestamp, date, bet }."
  * @property {string | null} lastPickDate - `toDateString()` of the last date a pick was made.
  * @property {Theme} theme - Current UI theme ('dark' or 'light').
  * @property {boolean} soundEnabled - Is sound enabled?
  * @property {string} displayName - User's display name from Whop account.
  * @property {boolean} isPublic - Whether user data can appear on leaderboard.
  * @property {WeeklyStats} weeklyStats - Stats for the current week.
+ * @property {number} coins - User's current coin balance.
+ * @property {number} totalCoinsEarned - Total coins earned throughout all time.
+ * @property {number} totalCoinsSpent - Total coins spent throughout all time.
+ * @property {string | null} lastDailyBonus - ISO string of the last date daily bonus was claimed.
+ * @property {Array<Object>} bettingHistory - History of bets made.
+ * @property {Array<string>} achievements - IDs of unlocked achievements.
  */
 
 /**
@@ -178,7 +184,6 @@ const useWhop = () => {
  * @property {string} venue - Venue name.
  * @property {string} startTime - Matchup start time (ISO string).
  * @property {string} status - Current status of the matchup (e.g., 'upcoming').
- * @property {number} gameIndex - Index of the game in the carousel.
  */
 
 /**
@@ -208,6 +213,16 @@ const useWhop = () => {
  * @property {LeaderboardEntry[]} users - Array of top users.
  * @property {number | null} userRank - Current user's rank.
  * @property {string | null} lastUpdated - ISO string of last update time.
+ */
+
+/**
+ * @typedef {Object} Achievement
+ * @property {string} id - Unique ID.
+ * @property {string} title - Display title.
+ * @property {string} description - Description.
+ * @property {string} emoji - Emoji icon.
+ * @property {number} coinReward - Coins awarded for unlocking.
+ * @property {function(UserState): boolean} checkCondition - Function to check if unlocked.
  */
 
 
@@ -354,10 +369,11 @@ const getMLBTeamColors = (abbr) => {
 };
 
 /**
- * UPDATED: getTodaysMLBGames to return multiple games
+ * SINGLE SOURCE OF TRUTH - Gets today's MLB game
+ * NO FALLBACKS, NO SIMULATIONS, NO EXCEPTIONS
  */
-const getTodaysMLBGames = async () => {
-    console.log('🎯 MULTI-GAME API CALL - STARTING');
+const getTodaysMLBGame = async () => {
+    console.log('🎯 SINGLE API CALL - STARTING');
     
     // ✅ CRITICAL FIX: Use local date, not UTC for API query
     const now = new Date();
@@ -397,14 +413,13 @@ const getTodaysMLBGames = async () => {
             throw new Error(`No MLB games found for ${today}`);
         }
         
-        // Take up to 3 games instead of just the first one
-        const games = data.dates[0].games.slice(0, 3);
-        console.log(`🎯 Selected ${games.length} games.`);
+        // TAKE FIRST AVAILABLE GAME - PERIOD
+        const game = data.dates[0].games[0];
+        console.log('🎯 Selected game:', game.teams.home.team.name, 'vs', game.teams.away.team.name);
         
-        // RETURN STANDARDIZED FORMAT for each game
-        return games.map((game, index) => ({
-            id: `${game.gamePk}_${index}`, // Unique ID per game, incorporating index for uniqueness if gamePk duplicates
-            gamePk: game.gamePk.toString(), // Keep original gamePk for result fetching
+        // RETURN STANDARDIZED FORMAT
+        return {
+            id: game.gamePk.toString(),
             homeTeam: {
                 name: game.teams.home.team.name,
                 abbr: game.teams.home.team.abbreviation,
@@ -420,9 +435,8 @@ const getTodaysMLBGames = async () => {
             sport: 'MLB',
             venue: game.venue?.name || 'MLB Stadium',
             startTime: new Date(game.gameDate).toISOString(),
-            status: 'upcoming',
-            gameIndex: index // Track position in carousel
-        }));
+            status: 'upcoming'
+        };
         
     } catch (error) {
         // Log the full error object for better debugging
@@ -475,14 +489,14 @@ function getTeamAbbreviation(teamName) {
 
 /**
  * FIXED: Get game results from the schedule API using the GAME'S date, not today's date
- * @param {string} gamePk - MLB game ID (gamePk)
+ * @param {string} gameId - MLB game ID (gamePk)
  * @param {string} sport - Sport type (should be 'MLB')
  * @param {string} gameDate - The actual date of the game (ISO string from todaysMatchup.startTime)
  * @returns {Promise<Object|null>} Game result or null
  */
-const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
+const fetchMLBGameResult = async (gameId, sport, gameDate) => {
     try {
-        console.log(`🔍 Fetching MLB game result for gamePk ${gamePk}`);
+        console.log(`🔍 Fetching MLB game result for game ${gameId}`);
         
         // ✅ FIX: Use the game's actual date, not today's date
         let searchDate;
@@ -509,16 +523,16 @@ const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
         const data = await response.json();
         
         // Find the specific game by ID
-        const game = data.dates?.[0]?.games?.find(g => g.gamePk.toString() === gamePk.toString());
+        const game = data.dates?.[0]?.games?.find(g => g.gamePk.toString() === gameId.toString());
         
         if (!game) {
-            console.log(`❌ Game ${gamePk} not found in ${searchDate} schedule`);
+            console.log(`❌ Game ${gameId} not found in ${searchDate} schedule`);
             return null;
         }
         
         // Check if game is finished
         if (game.status?.statusCode !== 'F') {
-            console.log(`⏳ Game ${gamePk} not finished yet. Status: ${game.status?.detailedState}`);
+            console.log(`⏳ Game ${gameId} not finished yet. Status: ${game.status?.detailedState}`);
             return null;
         }
         
@@ -533,7 +547,7 @@ const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
         else if (awayWon) winner = 'away';
         
         const result = {
-            gameId: gamePk, // Use gamePk for result tracking
+            gameId: gameId,
             status: 'completed',
             homeScore: homeScore,
             awayScore: awayScore,
@@ -548,12 +562,12 @@ const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
                 abbreviation: getTeamAbbreviation(game.teams.away.team.name),
                 score: awayScore
             },
-            completedAt: new Date().toISOString(), // Store as ISO string
+            completedAt: new Date(),
             rawGameData: game
         };
         
         console.log('✅ Successfully parsed game result from schedule:', {
-            gamePk,
+            gameId,
             searchDate,
             homeScore,
             awayScore,
@@ -565,7 +579,7 @@ const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
         return result;
         
     } catch (error) {
-        console.error(`❌ Error fetching game result for ${gamePk}:`, error.message);
+        console.error(`❌ Error fetching game result for ${gameId}:`, error.message);
         return null;
     }
 };
@@ -577,7 +591,7 @@ const fetchMLBGameResult = async (gamePk, sport, gameDate) => {
  * useLocalStorage hook for persistent state management using window.localStorage.
  * Modified to accept a userId for key personalization.
  * FIXED VERSION - prevents infinite re-render loop
- * @param {string} keyPrefix - The prefix for local storage key (e.e., 'streakPickemUser').
+ * @param {string} keyPrefix - The prefix for local storage key (e.g., 'streakPickemUser').
  * @param {any} initialValue - Initial value if nothing in storage.
  * @param {string | null} userId - The user's unique ID from Whop. If null, uses a generic key.
  * @returns {[any, (value: any) => void]} - Value and setter.
@@ -607,10 +621,10 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 
                 console.log('Date comparison for reset:', { currentDate, storedDate, different: storedDate !== currentDate });
 
-                // Reset todaysPicks and update lastPickDate if it's a new day
+                // Reset todaysPick and update lastPickDate if it's a new day
                 if (storedDate !== currentDate) {
                     console.log('🔄 Resetting picks for new day');
-                    updatedParsedItem.todaysPicks = {}; // Changed from todaysPick to todaysPicks
+                    updatedParsedItem.todaysPick = null;
                     updatedParsedItem.lastPickDate = currentDate;
                 }
 
@@ -623,6 +637,15 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                         weekStart: currentWeekMonday
                     };
                 }
+                // Ensure coins and achievement states are initialized if missing in old state
+                if (typeof updatedParsedItem.coins === 'undefined') updatedParsedItem.coins = initialValue.coins;
+                if (typeof updatedParsedItem.totalCoinsEarned === 'undefined') updatedParsedItem.totalCoinsEarned = initialValue.totalCoinsEarned;
+                if (typeof updatedParsedItem.totalCoinsSpent === 'undefined') updatedParsedItem.totalCoinsSpent = initialValue.totalCoinsSpent;
+                if (typeof updatedParsedItem.lastDailyBonus === 'undefined') updatedParsedItem.lastDailyBonus = initialValue.lastDailyBonus;
+                if (typeof updatedParsedItem.bettingHistory === 'undefined') updatedParsedItem.bettingHistory = initialValue.bettingHistory;
+                if (typeof updatedParsedItem.achievements === 'undefined') updatedParsedItem.achievements = initialValue.achievements;
+
+
                 return updatedParsedItem;
             }
 
@@ -718,6 +741,7 @@ const useSound = (soundEnabled) => {
             sounds.current['achievement_unlock'] = buffer;
             sounds.current['notification'] = buffer;
             sounds.current['button_click'] = buffer; // Generic click sound
+            sounds.current['coin_collect'] = buffer; // New sound for coins
         }
 
         // Cleanup AudioContext on unmount
@@ -764,7 +788,7 @@ const useNotifications = () => {
     }, []);
 
     const dismissNotification = useCallback((id) => {
-        setNotifications((prev) => prev.filter((n) => n.id !== n.id));
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, []);
 
     return { notifications, addNotification, dismissNotification };
@@ -899,6 +923,57 @@ const useFirebaseLeaderboard = (userState, userId) => {
     };
 };
 
+/**
+ * useHapticFeedback hook for mobile haptic feedback.
+ */
+const useHapticFeedback = () => {
+    const triggerFeedback = useCallback((type = 'light') => {
+        if ('vibrate' in navigator) {
+            const patterns = {
+                light: [10],
+                medium: [20],
+                heavy: [30],
+                success: [10, 50, 10],
+                error: [100, 50, 100],
+                pick_confirm: [15]
+            };
+            navigator.vibrate(patterns[type]);
+        }
+    }, []);
+    return triggerFeedback;
+};
+
+/**
+ * useSwipeGesture hook for swipe-to-select teams on mobile.
+ * @param {function} onSwipeLeft - Callback for left swipe.
+ * @param {function} onSwipeRight - Callback for right swipe.
+ */
+const useSwipeGesture = (onSwipeLeft, onSwipeRight) => {
+    const startX = useRef(0);
+    const endX = useRef(0);
+    const threshold = 50; // Minimum distance for a swipe
+
+    const onTouchStart = useCallback((e) => {
+        startX.current = e.touches[0].clientX;
+        endX.current = e.touches[0].clientX;
+    }, []);
+
+    const onTouchMove = useCallback((e) => {
+        endX.current = e.touches[0].clientX;
+    }, []);
+
+    const onTouchEnd = useCallback(() => {
+        const diff = startX.current - endX.current;
+        if (diff > threshold) {
+            onSwipeLeft();
+        } else if (diff < -threshold) {
+            onSwipeRight();
+        }
+    }, [onSwipeLeft, onSwipeRight]);
+
+    return { onTouchStart, onTouchMove, onTouchEnd };
+};
+
 
 // --- Data Generation & Constants ---
 
@@ -907,7 +982,7 @@ const initialUserState = {
     bestStreak: 0,
     totalPicks: 0,
     correctPicks: 0,
-    todaysPicks: {}, // Changed to object for multiple picks: { gameId: { selectedTeam, timestamp, date, gamePk, isChecked: boolean } }
+    todaysPick: null, // { matchupId, selectedTeam, timestamp, date, bet }
     lastPickDate: null,
     theme: 'dark',
     soundEnabled: true,
@@ -917,8 +992,97 @@ const initialUserState = {
         picks: 0,
         correct: 0,
         weekStart: null // Will be set to Monday of current week
-    }
+    },
+    coins: 500, // Starting coins
+    totalCoinsEarned: 500,
+    totalCoinsSpent: 0,
+    lastDailyBonus: null, // ISO string of last bonus collection date
+    bettingHistory: [], // Array of { matchupId, pickDate, selectedTeam, betAmount, won, winnings }
+    achievements: [] // Array of achievement IDs
 };
+
+/**
+ * List of all defined achievements.
+ * @type {Achievement[]}
+ */
+const ACHIEVEMENTS_LIST = [
+    {
+        id: 'streak_5',
+        title: '5-Day Streaker',
+        description: 'Achieve a 5-day winning streak!',
+        emoji: '⚡',
+        coinReward: 100,
+        checkCondition: (userState) => userState.currentStreak >= 5
+    },
+    {
+        id: 'streak_10',
+        title: 'Double Digit Dominator',
+        description: 'Reach a 10-day winning streak!',
+        emoji: '🔥',
+        coinReward: 250,
+        checkCondition: (userState) => userState.currentStreak >= 10
+    },
+    {
+        id: 'streak_20',
+        title: 'Master Streaker',
+        description: 'Hit an incredible 20-day winning streak!',
+        emoji: '🏆',
+        coinReward: 500,
+        checkCondition: (userState) => userState.currentStreak >= 20
+    },
+    {
+        id: 'coin_1k',
+        title: 'Coin Collector I',
+        description: 'Earn 1,000 total coins.',
+        emoji: '💰',
+        coinReward: 50,
+        checkCondition: (userState) => userState.totalCoinsEarned >= 1000
+    },
+    {
+        id: 'coin_5k',
+        title: 'Coin King/Queen',
+        description: 'Accumulate 5,000 total coins.',
+        emoji: '👑',
+        coinReward: 200,
+        checkCondition: (userState) => userState.totalCoinsEarned >= 5000
+    },
+    {
+        id: 'accuracy_70',
+        title: 'Sharp Shooter',
+        description: 'Achieve 70%+ accuracy over 10+ picks.',
+        emoji: '🎯',
+        coinReward: 100,
+        checkCondition: (userState) => userState.totalPicks >= 10 && (userState.correctPicks / userState.totalPicks) >= 0.7
+    },
+    {
+        id: 'high_roller',
+        title: 'High Roller',
+        description: 'Bet 100 coins and win!',
+        emoji: '🤑',
+        coinReward: 150,
+        checkCondition: (userState) => userState.bettingHistory.some(b => b.betAmount === 100 && b.won)
+    },
+    {
+        id: 'lucky_seven',
+        title: 'Lucky Seven Streak',
+        description: 'Win 7 bets in a row!',
+        emoji: '🍀',
+        coinReward: 300,
+        checkCondition: (userState) => {
+            if (userState.bettingHistory.length < 7) return false;
+            let consecutiveWins = 0;
+            for (let i = userState.bettingHistory.length - 1; i >= 0; i--) {
+                if (userState.bettingHistory[i].won) {
+                    consecutiveWins++;
+                    if (consecutiveWins >= 7) return true;
+                } else {
+                    consecutiveWins = 0;
+                }
+            }
+            return false;
+        }
+    }
+];
 
 
 // --- Share Utilities ---
@@ -926,12 +1090,11 @@ const initialUserState = {
 /**
  * Generates viral share text based on user context
  * @param {Object} userState - Current user state
- * @param {Object} todaysGames - Today's games array (optional)
- * @param {number} currentGameIndex - Current game index for 'pick' share type
+ * @param {Object} todaysMatchup - Today's matchup (optional)
  * @param {string} shareType - Type of share ('streak', 'pick', 'achievement', 'challenge')
  * @returns {string} Formatted share text
  */
-const generateShareText = (userState, todaysGames = [], currentGameIndex = 0, shareType = 'streak') => {
+const generateShareText = (userState, todaysMatchup = null, shareType = 'streak') => {
     const appUrl = window.location.origin; // Gets current domain
     const streakEmoji = userState.currentStreak >= 10 ? '🔥' : userState.currentStreak >= 5 ? '⚡' : '🎯';
 
@@ -946,31 +1109,20 @@ const generateShareText = (userState, todaysGames = [], currentGameIndex = 0, sh
             }
 
         case 'pick':
-            const currentGame = todaysGames[currentGameIndex];
-            const userPick = userState.todaysPicks[currentGame?.id];
-            if (!currentGame || !userPick) return generateShareText(userState, todaysGames, currentGameIndex, 'streak'); // Fallback if no pick made
-            
-            const pickedTeamName = userPick.selectedTeam === 'home' ? currentGame.homeTeam.name : currentGame.awayTeam.name;
-            return `Today's pick for ${currentGame.homeTeam.name} vs ${currentGame.awayTeam.name}: I'm going with ${pickedTeamName}! 🤔\n\nCurrent streak: ${userState.currentStreak} ${streakEmoji}\n\nJoin me: ${appUrl}`;
+            if (!todaysMatchup || !userState.todaysPick) return generateShareText(userState, null, 'streak'); // Fallback if no pick made
+            const pickedTeam = userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name;
+            return `Today's pick: ${todaysMatchup.homeTeam.name} vs ${todaysMatchup.awayTeam.name} ${todaysMatchup.homeTeam.logo}\n\nI'm going with ${pickedTeam}! 🤔\n\nCurrent streak: ${userState.currentStreak} ${streakEmoji}\n\nJoin me: ${appUrl}`;
 
         case 'achievement':
-            const milestones = {
-                5: "🎉 5-DAY STREAK UNLOCKED! 🎉",
-                10: "🔥 DOUBLE DIGITS! 10-DAY STREAK! 🔥",
-                15: "⚡ 15 DAYS OF PURE FIRE! ⚡",
-                20: "🚨 20-DAY STREAK ALERT! 🚨",
-                25: "👑 QUARTER CENTURY! 25 DAYS! 👑",
-                30: "🏆 30 DAYS OF DOMINATION! 🏆"
-            };
-
-            const milestoneText = milestones[userState.currentStreak] || `🔥 ${userState.currentStreak}-DAY STREAK! 🔥`;
-            return `${milestoneText}\n\nI'm absolutely crushing it on Streak Pick'em! 💪\n\nWho wants to challenge the champion? 😎\n\n${appUrl}`;
+            const currentAchievement = ACHIEVEMENTS_LIST.find(a => userState.achievements.includes(a.id)); // Find a relevant one, ideally the last unlocked
+            const achievementText = currentAchievement ? `${currentAchievement.emoji} ${currentAchievement.title} UNLOCKED! ${currentAchievement.emoji}` : `I just unlocked an achievement on Streak Pick'em! 🎉`;
+            return `${achievementText}\n\nI'm absolutely crushing it on Streak Pick'em! 💪\n\nWho wants to challenge the champion? 😎\n\n${appUrl}`;
 
         case 'challenge':
             return `🏆 I just hit ${userState.currentStreak} days on Streak Pick'em!\n\nBet you can't beat my streak 😏\n\nProve me wrong: ${appUrl}`;
 
         default:
-            return generateShareText(userState, todaysGames, currentGameIndex, 'streak');
+            return generateShareText(userState, todaysMatchup, 'streak');
     }
 };
 
@@ -1043,21 +1195,20 @@ const shareToGeneric = async (text, url = '') => {
  * ShareButton - Main share trigger button
  * @param {Object} props
  * @param {Object} props.userState - Current user state
- * @param {Object} props.todaysGames - Today's games array
- * @param {number} props.currentGameIndex - Current game index
+ * @param {Object} props.todaysMatchup - Today's matchup
  * @param {string} props.shareType - Type of share
  * @param {function} props.onShare - Callback after sharing
  * @param {string} props.className - Custom styling
  * @param {React.ReactNode} props.children - Button content
  */
-const ShareButton = ({ userState, todaysGames, currentGameIndex, shareType = 'streak', onShare, className = '', children }) => {
+const ShareButton = ({ userState, todaysMatchup, shareType = 'streak', onShare, className = '', children }) => {
     const [sharing, setSharing] = useState(false);
 
     const handleShare = async () => {
         setSharing(true);
 
         try {
-            const shareText = generateShareText(userState, todaysGames, currentGameIndex, shareType);
+            const shareText = generateShareText(userState, todaysMatchup, shareType);
             const success = await handleNativeShare(shareText, window.location.origin);
 
             if (success) {
@@ -1088,18 +1239,17 @@ const ShareButton = ({ userState, todaysGames, currentGameIndex, shareType = 'st
  * @param {boolean} props.isOpen - Modal visibility
  * @param {function} props.onClose - Close modal callback
  * @param {Object} props.userState - Current user state
- * @param {Object} props.todaysGames - Today's games array
- * @param {number} props.currentGameIndex - Current game index for 'pick' share type
+ * @param {Object} props.todaysMatchup - Today's matchup
  * @param {function} props.onShare - Share callback
  * @param {function} props.addNotification - Function to add a notification
  */
-const ShareModal = ({ isOpen, onClose, userState, todaysGames, currentGameIndex, onShare, addNotification }) => {
+const ShareModal = ({ isOpen, onClose, userState, todaysMatchup, onShare, addNotification }) => {
     if (!isOpen) return null;
 
     const [shareType, setShareType] = useState('streak');
     const [copySuccess, setCopySuccess] = useState(false);
 
-    const shareText = generateShareText(userState, todaysGames, currentGameIndex, shareType);
+    const shareText = generateShareText(userState, todaysMatchup, shareType);
 
     const handlePlatformShare = async (platform) => {
         const url = window.location.origin;
@@ -1311,16 +1461,21 @@ const AnimatedStreakDisplay = ({ currentStreak, bestStreak, isIncreasing }) => {
 };
 
 /**
- * EnhancedTeamCard Component
- * @param {Object} props
- * @param {Team} props.team - Team data.
- * @param {boolean} props.isSelected - Whether this team is currently selected (for UI highlight).
- * @param {boolean} props.isPicked - Whether this team was the user's pick for today.
- * @param {function} props.onClick - Click handler for the card.
- * @param {boolean} props.disabled - Whether the card is disabled.
+ * FIXED EnhancedTeamCard Component - Replace your existing one
  */
 const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => {
     const [primaryColor, secondaryColor] = team.colors;
+
+    // Convert hex to RGB for CSS variables
+    const hexToRgb = (hex) => {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? 
+            `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : 
+            '128, 128, 128'; // fallback gray
+    };
+
+    const primaryRgb = hexToRgb(primaryColor);
+    const secondaryRgb = hexToRgb(secondaryColor);
 
     return (
         <button
@@ -1328,8 +1483,11 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
             disabled={disabled}
             className={`team-card ${isSelected ? 'selected' : ''} ${isPicked ? 'picked' : ''} ${disabled ? 'disabled' : ''}`}
             style={{
+                // Set both hex and RGB variables
                 '--team-primary': `#${primaryColor}`,
                 '--team-secondary': `#${secondaryColor}`,
+                '--team-primary-rgb': primaryRgb,
+                '--team-secondary-rgb': secondaryRgb,
             }}
         >
             <div className="text-5xl mb-2 team-logo">
@@ -1342,7 +1500,7 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
                 {team.name}
             </div>
 
-            {/* ✅ ENHANCED Color accent bar with REAL team colors */}
+            {/* Enhanced Color accent bar */}
             <div
                 className="color-accent"
                 style={{
@@ -1363,14 +1521,14 @@ const EnhancedTeamCard = ({ team, isSelected, isPicked, onClick, disabled }) => 
  * GameResultDisplay Component - Shows final game results
  * @param {Object} props
  * @param {Object} props.result - The game result object.
- * @param {Object} props.game - The matchup details for this specific game.
- * @param {Object} props.userPick - The user's pick for this specific game.
+ * @param {Object} props.todaysMatchup - The matchup details.
+ * @param {Object} props.userPick - The user's pick for today.
  */
-const GameResultDisplay = ({ result, game, userPick }) => {
-    if (!result || !game) return null;
+const GameResultDisplay = ({ result, todaysMatchup, userPick }) => {
+    if (!result || !todaysMatchup) return null;
     
-    const winnerTeam = result.winner === 'home' ? game.homeTeam : game.awayTeam;
-    const userPickedTeam = userPick?.selectedTeam ? (userPick.selectedTeam === 'home' ? game.homeTeam : game.awayTeam) : null;
+    const winnerTeam = result.winner === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam;
+    const userPickedTeam = userPick?.selectedTeam ? (userPick.selectedTeam === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam) : null;
     const userWasCorrect = userPick?.selectedTeam === result.winner;
     
     return (
@@ -1379,11 +1537,11 @@ const GameResultDisplay = ({ result, game, userPick }) => {
                 <h4 className="font-bold text-lg text-text-primary mb-2">🏆 Final Result</h4>
                 <div className="text-2xl font-bold">
                     <span className={result.winner === 'home' ? 'text-accent-win' : 'text-text-primary'}>
-                        {game.homeTeam.abbr} {result.homeScore}
+                        {todaysMatchup.homeTeam.abbr} {result.homeScore}
                     </span>
                     <span className="text-text-secondary mx-2">-</span>
                     <span className={result.winner === 'away' ? 'text-accent-win' : 'text-text-primary'}>
-                        {result.awayScore} {game.awayTeam.abbr}
+                        {result.awayScore} {todaysMatchup.awayTeam.abbr}
                     </span>
                 </div>
                 <p className="text-sm text-text-secondary mt-1">
@@ -1691,52 +1849,53 @@ const ErrorDisplay = ({ message }) => (
 // ========== GAMETIMEDISPLAY WITH ENHANCED DEBUGGING ==========
 /**
  * Enhanced GameTimeDisplay with detailed mobile debugging
- * @param {Object} props
- * @param {string} props.startTime - ISO string of the game start time.
- * @param {function} props.setTimeLeft - Callback to update time left string.
- * @param {string} props.gameId - Unique ID of the game.
- * @param {function} props.setGameStarted - Callback to update gameStarted status for this game.
  */
-const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, gameId, setGameStarted }) => {
+const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, matchupId }) => {
     const [gameTime, setGameTime] = useState(null);
     const [error, setError] = useState(null);
-    const intervalRef = useRef(null);
 
     useEffect(() => {
         if (!startTime) {
             setTimeLeft('No start time');
             setError('No start time provided');
-            setGameStarted(true); // Treat as started if no time
             return;
         }
 
+        // Ensured robust date parsing
         let parsedTime = null;
+
         try {
             parsedTime = new Date(startTime);
             if (isNaN(parsedTime.getTime())) {
                 throw new Error('Invalid date');
             }
+            
             setGameTime(parsedTime);
             setError(null);
+            
+
         } catch (parseError) {
-            console.error(`Timer for ${gameId}: Date parsing failed:`, parseError);
-            const fallbackTime = new Date(Date.now() + 60 * 60 * 1000); // Fallback to 1 hour from now
+            console.error('Timer: Date parsing failed:', parseError);
+            const fallbackTime = new Date(Date.now() + 60 * 60 * 1000);
             setGameTime(fallbackTime);
             setError(`Parse failed: ${parseError.message}`);
         }
-    }, [startTime, gameId, setTimeLeft, setGameStarted]);
+    }, [startTime, matchupId]);
 
+    // Enhanced timer logic with debugging
     useEffect(() => {
         if (!gameTime) return;
 
+        let isActive = true;
+
         const updateTimer = () => {
+            if (!isActive) return;
+
             const now = new Date();
             const diff = gameTime - now;
 
             if (diff <= 0) {
-                setGameStarted(true);
                 setTimeLeft('Game Started');
-                clearInterval(intervalRef.current);
                 return;
             }
 
@@ -1744,16 +1903,19 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, gameId, setGameStarte
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
             
-            const timeString = `${hours > 0 ? `${hours}h ` : ''}${minutes}m ${seconds}s`;
+            const timeString = `${hours}h ${minutes}m ${seconds}s`;
             setTimeLeft(timeString);
-            setGameStarted(false);
+            
         };
 
         updateTimer(); // Initial call
-        intervalRef.current = setInterval(updateTimer, 1000);
+        const intervalId = setInterval(updateTimer, 1000);
 
-        return () => clearInterval(intervalRef.current);
-    }, [gameTime, setTimeLeft, setGameStarted]);
+        return () => {
+            isActive = false;
+            clearInterval(intervalId);
+        };
+    }, [gameTime, setTimeLeft]);
 
     if (!gameTime) {
         return (
@@ -1783,287 +1945,254 @@ const EnhancedGameTimeDisplay = ({ startTime, setTimeLeft, gameId, setGameStarte
     );
 };
 
-// Chevron Icons (for carousel navigation)
-const ChevronLeft = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-8 h-8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-    </svg>
-);
 
-const ChevronRight = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-8 h-8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-    </svg>
-);
-
-
-// ADD: Status badges for each game state
-const GameStatusBadge = ({ game, userPick, gameStarted, gameResult }) => {
-    if (gameResult) {
-        const isCorrect = userPick?.selectedTeam === gameResult.winner;
-        return (
-            <div className={`status-badge ${isCorrect ? 'correct' : 'incorrect'}`}>
-                {isCorrect ? '✅ Correct' : '❌ Wrong'}
-            </div>
-        );
-    }
-    
-    if (userPick && userPick.isSubmitted) { // Check if pick is submitted
-        return (
-            <div className="status-badge picked">
-                ✅ Picked: {userPick.selectedTeam === 'home' ? game.homeTeam.abbr : game.awayTeam.abbr}
-            </div>
-        );
-    }
-    
-    if (gameStarted) {
-        return <div className="status-badge locked">🔒 Game Started</div>;
-    }
-    
-    return <div className="status-badge available">⚡ Make Your Pick</div>;
-};
-
+// --- NEW COMPONENTS ---
 
 /**
- * GameCard Component
- * @param {Object} props
- * @param {Matchup} props.game - Game data.
- * @param {boolean} props.isActive - Whether this card is the currently active one in the carousel.
- * @param {Object} props.userPick - The user's pick for this specific game (from dailyPicks[game.id]).
- * @param {(team: 'home' | 'away') => void} props.onPick - Pick handler for this game.
- * @param {boolean} props.disabled - Whether the pick buttons for this game should be disabled.
- * @param {string} props.timeLeft - Time left string for this game.
- * @param {function} props.setTimeLeft - Function to update timeLeft for this game.
- * @param {boolean} props.gameStarted - Whether this specific game has started.
- * @param {function} props.setGameStarted - Function to set gameStarted status for this game.
- * @param {Object} props.gameResult - The result object for this game, if available.
- * @param {function} props.fetchAndDisplayResult - Function to fetch and display result for this game.
- * @param {boolean} props.resultLoading - Loading state for result checking.
+ * Pick Confirmation Modal
  */
-const GameCard = ({ game, isActive, userPick, onPick, disabled, timeLeft, setTimeLeft, gameStarted, setGameStarted, gameResult, fetchAndDisplayResult, resultLoading }) => {
-    const hasPickedThisGame = userPick?.selectedTeam;
+const PickConfirmationModal = ({ isOpen, onClose, onConfirm, selectedTeam, matchup, betAmount, userCoins }) => {
+    if (!isOpen || !selectedTeam || !matchup) return null;
+
+    const otherTeam = selectedTeam.abbr === matchup.homeTeam.abbr ? matchup.awayTeam : matchup.homeTeam;
+    const triggerHaptic = useHapticFeedback();
+
+    const handleConfirm = () => {
+        triggerHaptic('pick_confirm');
+        onConfirm();
+    };
+
+    const handleCancel = () => {
+        triggerHaptic('light');
+        onClose();
+    };
 
     return (
-        <div className={`game-card ${isActive ? 'active' : ''}`}>
-            {/* Game info header */}
-            <div className="game-header">
-                <span className="sport-badge">{game.sport}</span>
-                <span className="venue">{game.venue}</span>
-                {/* Time left and game time */}
-                <div className="text-center mt-2">
-                    {game.startTime ? (
-                        <EnhancedGameTimeDisplay 
-                            startTime={game.startTime} 
-                            setTimeLeft={setTimeLeft}
-                            gameId={game.id}
-                            setGameStarted={setGameStarted}
-                        />
-                    ) : (
-                        <div className="text-red-500">⚠️ No game time available</div>
-                    )}
-                    <p className="game-time-large">
-                        ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] backdrop-blur-sm p-4">
+            <div className="bg-bg-secondary rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-2 border-bg-tertiary animate-fadeInUp">
+                <h3 className="text-xl font-bold text-center mb-4 text-text-primary">Confirm Your Pick</h3>
+                
+                {/* Team Card Preview */}
+                <div className="text-center mb-6">
+                    <div className="text-6xl mb-2">{selectedTeam.logo}</div>
+                    <h4 className="text-lg font-bold text-text-primary">{selectedTeam.name}</h4>
+                    <p className="text-sm text-text-secondary">vs {otherTeam.abbr}</p>
+                    <p className="text-md text-text-secondary mt-2">Bet Amount: <span className="font-bold text-yellow-400">{betAmount} 🪙</span></p>
+                    <p className="text-md text-text-secondary">Potential Winnings: <span className="font-bold text-green-400">{betAmount * 2} 🪙</span></p>
+                </div>
+                
+                {/* Warning Text */}
+                <div className="bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-400 rounded-lg p-3 mb-4">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-400 text-center">
+                        ⚠️ This pick cannot be changed once confirmed!
                     </p>
                 </div>
-            </div>
-            
-            {/* Team selection (reuse existing team-selection-container) */}
-            <div className="team-selection-container">
-                <EnhancedTeamCard
-                    team={game.homeTeam}
-                    isSelected={userPick?.selectedTeam === 'home'}
-                    onClick={() => onPick('home')}
-                    disabled={disabled || hasPickedThisGame || gameStarted} // Disable if picked or game started
-                />
                 
-                <div className="vs-divider">VS</div>
-                
-                <EnhancedTeamCard
-                    team={game.awayTeam}
-                    isSelected={userPick?.selectedTeam === 'away'}
-                    onClick={() => onPick('away')}
-                    disabled={disabled || hasPickedThisGame || gameStarted} // Disable if picked or game started
-                />
-            </div>
-            
-            {/* Pick status or Game Result */}
-            <div className="text-center">
-                {gameResult ? (
-                    <GameResultDisplay 
-                        result={gameResult} 
-                        game={game} 
-                        userPick={userPick} 
-                    />
-                ) : (
-                    <GameStatusBadge 
-                        game={game} 
-                        userPick={userPick} 
-                        gameStarted={gameStarted} 
-                        gameResult={gameResult} 
-                    />
-                )}
-                {gameStarted && !gameResult && userPick?.isSubmitted && (
-                    <div className="mt-3">
-                        {resultLoading ? (
-                            <p className="text-sm text-text-secondary">🔍 Checking game result...</p>
-                        ) : (
-                            <button
-                                onClick={() => fetchAndDisplayResult(game.gamePk, game.sport, game.startTime, game.id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm"
-                            >
-                                🔍 Check Result
-                            </button>
-                        )}
-                    </div>
-                )}
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                    <button onClick={handleCancel} className="flex-1 py-3 px-4 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md">
+                        Cancel
+                    </button>
+                    <button onClick={handleConfirm} className="flex-1 py-3 px-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md">
+                        Confirm Pick! 🎯
+                    </button>
+                </div>
             </div>
         </div>
     );
 };
 
-
 /**
- * GameCarousel component
- * @param {Object} props
- * @param {Matchup[]} props.games - Array of games to display.
- * @param {number} props.currentIndex - Current active game index.
- * @param {(index: number) => void} props.onIndexChange - Callback to change current index.
- * @param {Object} props.picks - Object of user's daily picks { gameId: pickData }.
- * @param {(gameId: string, team: 'home' | 'away') => void} props.onPick - Callback for making a pick.
- * @param {boolean} props.disabled - General disabled state for picks.
- * @param {Object.<string, string>} props.timeStates - Object mapping gameId to timeLeft string.
- * @param {Object.<string, function>} props.setTimeStates - Function to set time left for a specific game.
- * @param {Object.<string, boolean>} props.gameStartedStates - Object mapping gameId to gameStarted boolean.
- * @param {Object.<string, function>} props.setGameStartedStates - Function to set gameStarted status for a specific game.
- * @param {Object.<string, Object>} props.gameResults - Object mapping gameId to game result object.
- * @param {(gamePk: string, sport: string, startTime: string, gameId: string) => void} props.fetchAndDisplayResult - Function to fetch result for a specific game.
- * @param {Object.<string, boolean>} props.resultLoadingStates - Object mapping gameId to resultLoading boolean.
+ * Betting Interface Component
  */
-const GameCarousel = ({ 
-    games, 
-    currentIndex, 
-    onIndexChange,
-    picks,
-    onPick,
-    disabled,
-    timeStates,
-    setTimeStates,
-    gameStartedStates,
-    setGameStartedStates,
-    gameResults,
-    fetchAndDisplayResult,
-    resultLoadingStates
-}) => {
-    // Implement swipe detection
-    const [startX, setStartX] = useState(0);
-    const [isDragging, setIsDragging] = useState(false);
-    const carouselTrackRef = useRef(null);
-    
-    const handleTouchStart = useCallback((e) => {
-        setStartX(e.touches[0].clientX);
-        setIsDragging(true);
-    }, []);
-    
-    const handleTouchEnd = useCallback((e) => {
-        if (!isDragging) return;
-        const endX = e.changedTouches[0].clientX;
-        const diff = startX - endX;
-        
-        if (Math.abs(diff) > 50) { // Minimum swipe distance
-            if (diff > 0 && currentIndex < games.length - 1) {
-                onIndexChange(currentIndex + 1); // Swipe left = next
-            } else if (diff < 0 && currentIndex > 0) {
-                onIndexChange(currentIndex - 1); // Swipe right = prev
-            }
-        }
-        setIsDragging(false);
-    }, [isDragging, startX, currentIndex, games.length, onIndexChange]);
+const BettingInterface = ({ onBetChange, maxBet = 100, userCoins, currentBet }) => {
+    const quickBets = [10, 25, 50, 100];
+    const triggerHaptic = useHapticFeedback();
 
-    // Apply/remove dragging class for transition control
     useEffect(() => {
-        const trackElement = carouselTrackRef.current;
-        if (trackElement) {
-            if (isDragging) {
-                trackElement.classList.add('dragging');
-            } else {
-                trackElement.classList.remove('dragging');
-            }
+        // Ensure currentBet is within limits
+        if (currentBet > userCoins) {
+            onBetChange(Math.min(userCoins, quickBets[0])); // Set to minimum or userCoins if too low
         }
-    }, [isDragging]);
-    
+    }, [userCoins, currentBet, onBetChange]);
+
+    const handleBetButtonClick = (amount) => {
+        if (amount <= userCoins) {
+            onBetChange(amount);
+            triggerHaptic('light');
+        }
+    };
+
     return (
-        <div className="game-carousel-container">
-            {/* Navigation arrows */}
-            <button 
-                onClick={() => onIndexChange(Math.max(0, currentIndex - 1))}
-                disabled={currentIndex === 0}
-                className="carousel-arrow left"
-                aria-label="Previous game"
-            >
-                <ChevronLeft />
-            </button>
+        <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 rounded-xl p-4 border border-purple-500/30 mb-6">
+            <h4 className="font-bold text-center mb-3 text-text-primary">💰 Place Your Bet</h4>
             
-            {/* Swipeable card container */}
-            <div 
-                className={`carousel-viewport ${isDragging ? 'swiping' : ''}`}
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-            >
-                <div 
-                    ref={carouselTrackRef}
-                    className="carousel-track"
-                    style={{
-                        width: `${games.length * 100}%`, // Dynamically set track width
-                        transform: `translateX(-${currentIndex * (100 / games.length)}%)`, // Adjust for dynamic width
-                        // transition handled by CSS class based on isDragging
-                    }}
-                >
-                    {games.map((game, index) => (
-                        <div key={game.id} className="game-card-wrapper" style={{ flex: `0 0 ${100 / games.length}%` }}>
-                            <GameCard
-                                game={game}
-                                isActive={index === currentIndex}
-                                userPick={picks[game.id]}
-                                onPick={onPick}
-                                disabled={false} // Individual GameCard will handle its own disabled state
-                                timeLeft={timeStates[game.id] || ''}
-                                setTimeLeft={(time) => setTimeStates(prev => ({ ...prev, [game.id]: time }))}
-                                gameStarted={gameStartedStates[game.id] || false}
-                                setGameStarted={(started) => setGameStartedStates(prev => ({ ...prev, [game.id]: started }))}
-                                gameResult={gameResults[game.id]}
-                                fetchAndDisplayResult={fetchAndDisplayResult}
-                                resultLoading={resultLoadingStates[game.id] || false}
-                            />
-                        </div>
-                    ))}
-                </div>
+            {/* Coin Balance */}
+            <div className="text-center mb-3">
+                <span className="text-lg font-bold text-yellow-400">{userCoins} 🪙</span>
             </div>
             
-            <button 
-                onClick={() => onIndexChange(Math.min(games.length - 1, currentIndex + 1))}
-                disabled={currentIndex === games.length - 1}
-                className="carousel-arrow right"
-                aria-label="Next game"
-            >
-                <ChevronRight />
-            </button>
-            
-            {/* Indicator dots */}
-            <div className="carousel-indicators">
-                {games.map((_, index) => (
+            {/* Quick Bet Buttons */}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+                {quickBets.map(amount => (
                     <button
-                        key={index}
-                        onClick={() => onIndexChange(index)}
-                        className={`indicator ${index === currentIndex ? 'active' : ''}`}
-                        aria-label={`Go to game ${index + 1}`}
+                        key={amount}
+                        onClick={() => handleBetButtonClick(amount)}
+                        disabled={amount > userCoins}
+                        className={`py-2 px-3 rounded-lg font-semibold text-sm transition-all duration-200 transform hover:scale-105
+                            ${currentBet === amount 
+                                ? 'bg-purple-600 text-white' 
+                                : 'bg-bg-tertiary text-text-primary hover:bg-purple-600/50'
+                            }
+                            ${amount > userCoins ? 'opacity-50 cursor-not-allowed' : ''}
+                        `}
                     >
-                        <span className="dot-visual"></span>
+                        {amount} 🪙
                     </button>
                 ))}
             </div>
+            
+            {/* Potential Winnings */}
+            <div className="text-center text-sm text-text-secondary">
+                Win: <span className="font-bold text-green-400">{currentBet * 2} 🪙</span> | 
+                Risk: <span className="font-bold text-red-400">{currentBet} 🪙</span>
+            </div>
         </div>
     );
 };
+
+/**
+ * Daily Reward Modal
+ */
+const DailyRewardModal = ({ isOpen, onClose, rewardAmount }) => {
+    if (!isOpen) return null;
+    const triggerHaptic = useHapticFeedback();
+
+    const handleCollect = () => {
+        triggerHaptic('coin_collect');
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] backdrop-blur-sm p-4">
+            <div className="bg-bg-secondary rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-2 border-bg-tertiary animate-fadeInUp">
+                <div className="text-center">
+                    <div className="text-6xl mb-4 animate-bounce">🎁</div>
+                    <h3 className="text-2xl font-bold mb-2 text-text-primary">Daily Bonus!</h3>
+                    <p className="text-lg mb-4 text-text-secondary">You earned <span className="font-bold text-yellow-400">{rewardAmount} 🪙</span></p>
+                    <p className="text-sm text-text-secondary mb-6">Come back tomorrow for another bonus!</p>
+                    <button onClick={handleCollect} className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md">
+                        Collect Reward!
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Achievement Unlocked Modal
+ */
+const AchievementUnlockedModal = ({ achievement, isOpen, onClose }) => {
+    if (!isOpen || !achievement) return null;
+    const triggerHaptic = useHapticFeedback();
+
+    useEffect(() => {
+        if (isOpen) {
+            triggerHaptic('success');
+        }
+    }, [isOpen, triggerHaptic]);
+
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] backdrop-blur-sm p-4">
+            <div className="bg-bg-secondary rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-2 border-bg-tertiary animate-fadeInUp">
+                <div className="text-center">
+                    <div className="text-6xl mb-4 animate-pulse">{achievement.emoji}</div>
+                    <h3 className="text-xl font-bold mb-2 text-text-primary">Achievement Unlocked!</h3>
+                    <h4 className="text-lg text-purple-400 mb-2">{achievement.title}</h4>
+                    <p className="text-sm text-text-secondary mb-4">{achievement.description}</p>
+                    <div className="bg-gradient-to-r from-yellow-400 to-orange-400 text-black font-bold py-2 px-4 rounded-lg inline-block shadow-md">
+                        +{achievement.coinReward} 🪙 Bonus!
+                    </div>
+                    <button onClick={onClose} className="mt-6 w-full py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all duration-200 transform hover:scale-105 shadow-md">
+                        Awesome!
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Team Card Skeleton for loading state
+ */
+const TeamCardSkeleton = () => (
+    <div className="team-card animate-pulse bg-bg-secondary border-bg-tertiary">
+        <div className="w-16 h-16 bg-bg-tertiary rounded-full mb-2 loading-shimmer"></div>
+        <div className="w-12 h-4 bg-bg-tertiary rounded mb-1 loading-shimmer"></div>
+        <div className="w-20 h-3 bg-bg-tertiary rounded loading-shimmer"></div>
+        <div className="color-accent" style={{ background: 'linear-gradient(90deg, #505050, #808080)', height: '4px' }}></div>
+    </div>
+);
+
+/**
+ * Enhanced Button component with loading state
+ */
+const EnhancedButton = ({ children, onClick, loading, className = '', ...props }) => {
+    const triggerHaptic = useHapticFeedback();
+    const handleClick = (e) => {
+        if (!loading) {
+            triggerHaptic('light');
+            onClick && onClick(e);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleClick}
+            disabled={loading}
+            className={`relative overflow-hidden group py-3 px-4 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md ${className} ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+            {...props}
+        >
+            {loading && (
+                <div className="absolute inset-0 bg-white/20 flex items-center justify-center rounded-xl">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                </div>
+            )}
+            <span className={loading ? 'opacity-0' : 'opacity-100'}>{children}</span>
+        </button>
+    );
+};
+
+/**
+ * Floating Share Button
+ */
+const FloatingShareButton = ({ onClick }) => (
+    <button
+        onClick={onClick}
+        className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-300 z-40 flex items-center justify-center text-2xl"
+        aria-label="Quick share"
+    >
+        📱
+    </button>
+);
+
+/**
+ * Stats Card Component
+ */
+const StatsCard = ({ title, value, change, color }) => (
+    <div className="bg-bg-secondary rounded-xl p-4 border border-bg-tertiary hover:border-opacity-80 transition-all shadow-md">
+        <div className="flex justify-between items-start mb-2">
+            <span className="text-sm text-text-secondary">{title}</span>
+            {change !== undefined && change !== null && (
+                <span className={`text-xs font-semibold ${change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-text-secondary'}`}>
+                    {change > 0 ? '↗' : change < 0 ? '↘' : ''} {Math.abs(change)}{change !== 0 ? '%' : ''}
+                </span>
+            )}
+        </div>
+        <div className={`text-2xl font-bold ${color}`}>{value}</div>
+    </div>
+);
 
 
 // ========== APP COMPONENT WITH FIXES ==========
@@ -2081,10 +2210,13 @@ const App = ({ user }) => {
         sharesByPlatform: {},
         lastShared: null
     }, userId); 
-    // Game results history storage - Stores results for ALL games ever picked by user
-    const [gameResultsHistory, setGameResultsHistory] = useLocalStorage('gameResultsHistory', {}, userId); 
-    // State to hold results for games picked *today* (or current session) for display
-    const [todaysGameResultsDisplay, setTodaysGameResultsDisplay] = useState({});
+    // Game results history storage
+    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
+
+    // Add these new state variables in the App component
+    const [gameResult, setGameResult] = useState(null);
+    const [resultLoading, setResultLoading] = useState(false);
+    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId);
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -2092,6 +2224,7 @@ const App = ({ user }) => {
 
     const { playSound } = useSound(userState.soundEnabled);
     const { addNotification, notifications, dismissNotification } = useNotifications();
+    const triggerHaptic = useHapticFeedback(); // Initialize haptic feedback hook
 
     // Use local date for comparison
     const now = new Date();
@@ -2099,20 +2232,27 @@ const App = ({ user }) => {
     const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based, which is fine for week start
 
 
-    const [todaysGames, setTodaysGames] = useState([]); // Array of 3 games
-    const [currentGameIndex, setCurrentGameIndex] = useState(0); // Active card
-    const [dailyPicks, setDailyPicks] = useLocalStorage('dailyPicks', {}, userId); // User's picks for today's games
-
+    const [todaysMatchup, setTodaysMatchup] = useState(null);
     const [matchupLoading, setMatchupLoading] = useState(true);
     const [isInitialized, setIsInitialized] = useState(false); // NEW: To signal initial data load complete
     const [showShareModal, setShowShareModal] = useState(false); // State for share modal visibility
     const [showLeaderboard, setShowLeaderboard] = useState(false); // State for leaderboard modal visibility
     const [isStreakIncreasing, setIsStreakIncreasing] = useState(false); // For streak animation
+    const [timeLeft, setTimeLeft] = useState('');
+    const [gameStarted, setGameStarted] = useState(false); // New state for game started
 
-    // Per-game states for timer and game started status
-    const [timeStates, setTimeStates] = useState({}); // {gameId: timeLeftString}
-    const [gameStartedStates, setGameStartedStates] = useState({}); // {gameId: boolean}
-    const [resultLoadingStates, setResultLoadingStates] = useState({}); // {gameId: boolean}
+    // Pick Confirmation Modal states
+    const [showPickConfirmationModal, setShowPickConfirmationModal] = useState(false);
+    const [teamToConfirm, setTeamToConfirm] = useState(null);
+    const [betAmount, setBetAmount] = useState(25); // Default bet amount
+
+    // Daily Reward Modal states
+    const [showDailyRewardModal, setShowDailyRewardModal] = useState(false);
+    const DAILY_BONUS_AMOUNT = 50;
+
+    // Achievement Modal states
+    const [showAchievementModal, setShowAchievementModal] = useState(false);
+    const [unlockedAchievement, setUnlockedAchievement] = useState(null);
 
 
     // Initialize userState displayName and weeklyStats on first load or user change
@@ -2138,309 +2278,278 @@ const App = ({ user }) => {
                 needsUpdate = true;
             }
 
+            // Initialize new coin/betting fields if they don't exist (for old users)
+            if (typeof updatedState.coins === 'undefined') { updatedState.coins = initialUserState.coins; needsUpdate = true; }
+            if (typeof updatedState.totalCoinsEarned === 'undefined') { updatedState.totalCoinsEarned = initialUserState.totalCoinsEarned; needsUpdate = true; }
+            if (typeof updatedState.totalCoinsSpent === 'undefined') { updatedState.totalCoinsSpent = initialUserState.totalCoinsSpent; needsUpdate = true; }
+            if (typeof updatedState.lastDailyBonus === 'undefined') { updatedState.lastDailyBonus = initialUserState.lastDailyBonus; needsUpdate = true; }
+            if (typeof updatedState.bettingHistory === 'undefined') { updatedState.bettingHistory = initialUserState.bettingHistory; needsUpdate = true; }
+            if (typeof updatedState.achievements === 'undefined') { updatedState.achievements = initialUserState.achievements; needsUpdate = true; }
+
+
             return needsUpdate ? updatedState : prev;
         });
     }, [user, currentWeekMonday, setUserState]);
 
-
-    // Load today's games (multiple)
+    // Load today's matchup - SINGLE PATH ONLY
     useEffect(() => {
-        const loadTodaysGamesAsync = async () => {
+        const loadTodaysGame = async () => {
+            console.log('🎮 LOADING GAME - SINGLE PATH');
             setMatchupLoading(true);
+            
             try {
-                const games = await getTodaysMLBGames(); // New function
-                setTodaysGames(games);
-                console.log(`✅ Loaded ${games.length} games for today`);
+                const game = await getTodaysMLBGame();
+                setTodaysMatchup(game);
+                setIsInitialized(true);
+                console.log('✅ GAME LOADED SUCCESSFULLY:', game.homeTeam.name, 'vs', game.awayTeam.name);
+                
             } catch (error) {
-                console.error('❌ Failed to load games:', error);
-                setTodaysGames([]);
-            } finally {
-                setMatchupLoading(false);
+                console.error('❌ GAME LOADING FAILED:', error.message);
+                setTodaysMatchup(null); // NULL = NO GAME, SHOW ERROR
                 setIsInitialized(true);
             }
+            
+            setMatchupLoading(false);
         };
         
-        loadTodaysGamesAsync();
-    }, []); // Run once on component mount
+        loadTodaysGame();
+    }, []); // NO DEPENDENCIES - LOAD ONCE
 
 
-    // Initialize game states (timers, started status) when todaysGames changes
+    // Determine if user has picked today (only if todaysMatchup is available)
+    const hasPickedToday = todaysMatchup && userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.date === today;
+
+    // Game timer state
     useEffect(() => {
-        const initialTimeStates = {};
-        const initialGameStartedStates = {};
-        todaysGames.forEach(game => {
-            initialTimeStates[game.id] = ''; // Will be updated by EnhancedGameTimeDisplay
-            initialGameStartedStates[game.id] = false; // Will be updated by EnhancedGameTimeDisplay
-        });
-        setTimeStates(initialTimeStates);
-        setGameStartedStates(initialGameStartedStates);
-
-        // Populate todaysGameResultsDisplay from gameResultsHistory if available
-        const currentSessionResults = {};
-        todaysGames.forEach(game => {
-            if (gameResultsHistory[game.gamePk] && new Date(gameResultsHistory[game.gamePk].completedAt).toISOString().split('T')[0] === today) {
-                currentSessionResults[game.id] = gameResultsHistory[game.gamePk];
-            }
-        });
-        setTodaysGameResultsDisplay(currentSessionResults);
-
-    }, [todaysGames, gameResultsHistory, today]);
-
-
-    /**
-     * Handles a user making a pick for a specific game
-     * @param {string} gameId - Unique ID of the game picked.
-     * @param {'home' | 'away'} teamChoice - 'home' or 'away' team.
-     */
-    const handleMultiPick = useCallback((gameId, teamChoice) => {
-        const game = todaysGames.find(g => g.id === gameId);
-        if (!game) {
-            addNotification({ type: 'error', message: 'Game not found for pick.' });
+        if (!todaysMatchup?.startTime) {
+            setTimeLeft('No game time');
             return;
         }
-
-        // Check if pick already made for this specific game
-        if (dailyPicks[gameId] && dailyPicks[gameId].date === today && dailyPicks[gameId].isSubmitted) { // Only prevent if already submitted for today
-            addNotification({ type: 'warning', message: 'You have already submitted a pick for this game!' });
-            playSound('button_click');
-            return;
-        }
-        // Check if the game has started
-        if (gameStartedStates[game.id]) {
-            addNotification({ type: 'warning', message: 'This game has already started!' });
-            playSound('button_click');
-            return;
-        }
-
-        const newPick = {
-            selectedTeam: teamChoice,
-            timestamp: new Date().toISOString(),
-            date: today,
-            gameId: game.id, // Store the local unique game ID
-            gamePk: game.gamePk, // Store the MLB gamePk for result fetching
-            isSubmitted: false, // Mark as not yet submitted globally
-            isResultChecked: false, // To track if result has been checked for this pick
-        };
-
-        setDailyPicks(prev => ({
-            ...prev,
-            [gameId]: newPick
-        }));
         
-        // This count only increments when a pick is *made*, not submitted
-        // Total picks update will happen on submitAllPicks
-        setUserState(prev => ({
-            ...prev,
-            // totalPicks and weeklyStats.picks will be updated in submitAllPicks
-        }));
-
-        const pickedTeamName = teamChoice === 'home' ? game.homeTeam.name : game.awayTeam.name;
-        addNotification({
-            type: 'info',
-            message: `You picked: ${pickedTeamName}! Don't forget to submit.`
-        });
-        playSound('pick_select');
-    }, [todaysGames, dailyPicks, today, gameStartedStates, setDailyPicks, setUserState, addNotification, playSound]);
-
-
-    /**
-     * Submits all made picks for the day to userState and increments total picks.
-     */
-    const submitAllPicks = useCallback(() => {
-        const picksToSubmitCount = Object.keys(dailyPicks).length;
-        if (picksToSubmitCount === 0) {
-            addNotification({ type: 'warning', message: 'Make at least one pick before submitting!' });
+        // FORCE consistent parsing
+        let gameTime;
+        try {
+            gameTime = new Date(todaysMatchup.startTime);
+            if (isNaN(gameTime.getTime())) {
+                throw new Error('Invalid date');
+            }
+        } catch (error) {
+            console.error('Timer: Date parsing failed:', error);
+            setTimeLeft('Invalid game time');
             return;
         }
-
-        // Update userState with the submitted picks
-        setUserState(prev => {
-            // Mark all current dailyPicks as submitted
-            const submittedPicks = {};
-            let newTotalPicks = prev.totalPicks;
-            let newWeeklyPicks = prev.weeklyStats.picks;
-
-            for (const gameId in dailyPicks) {
-                const pick = dailyPicks[gameId];
-                if (!pick.isSubmitted) { // Only count if not already submitted
-                    newTotalPicks++;
-                    newWeeklyPicks++;
-                }
-                submittedPicks[gameId] = { ...pick, isSubmitted: true };
+        
+        const updateTimer = () => {
+            const now = new Date();
+            const diff = gameTime - now;
+            
+            if (diff <= 0) {
+                setGameStarted(true);
+                setTimeLeft('Game Started');
+                return;
             }
             
-            return {
-                ...prev,
-                todaysPicks: { ...prev.todaysPicks, ...submittedPicks }, // Merge new picks with any existing (e.g., from prior session/day)
-                lastPickDate: today,
-                totalPicks: newTotalPicks,
-                weeklyStats: {
-                    ...prev.weeklyStats,
-                    picks: newWeeklyPicks
-                }
-            };
-        });
-
-        // Update dailyPicks to mark them as submitted in localStorage as well
-        setDailyPicks(prev => {
-            const updatedPicks = {};
-            for (const gameId in prev) {
-                updatedPicks[gameId] = { ...prev[gameId], isSubmitted: true };
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            if (hours > 0) {
+                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+            } else {
+                setTimeLeft(`${minutes}m ${seconds}s`);
             }
-            return updatedPicks;
-        });
-
-        addNotification({ 
-            type: 'success', 
-            message: `${picksToSubmitCount} pick${picksToSubmitCount > 1 ? 's' : ''} submitted!` 
-        });
-        playSound('achievement_unlock');
-    }, [dailyPicks, setUserState, today, addNotification, playSound, setDailyPicks]);
+        };
+        
+        updateTimer(); // Initial call
+        const interval = setInterval(updateTimer, 1000);
+        
+        return () => clearInterval(interval);
+    }, [todaysMatchup?.startTime]);
 
 
     /**
-     * Fetches and displays result for a specific game, updates streak if applicable.
-     * @param {string} gamePk - The MLB gamePk for the game.
-     * @param {string} sport - Sport type.
-     * @param {string} startTime - Game start time ISO string.
-     * @param {string} gameId - The unique local ID of the game (from todaysGames).
+     * Handles opening the pick confirmation modal.
+     * @param {'home' | 'away'} teamChoice - 'home' or 'away' team.
      */
-    const fetchAndDisplayResult = useCallback(async (gamePk, sport, startTime, gameId) => {
-        setResultLoadingStates(prev => ({ ...prev, [gameId]: true }));
-        try {
-            const result = await fetchMLBGameResult(gamePk, sport, startTime);
-            if (result) {
-                // Update the state for displaying results on the carousel
-                setTodaysGameResultsDisplay(prev => ({
-                    ...prev,
-                    [gameId]: result
-                }));
-                // Store result in historical cache (by gamePk)
-                setGameResultsHistory(prev => ({
-                    ...prev,
-                    [gamePk]: result
-                }));
-                
-                // Find the pick for this specific game
-                const userPickForGame = dailyPicks[gameId];
+    const handlePickInitiate = useCallback((teamChoice) => {
+        if (!todaysMatchup) {
+            addNotification({ type: 'error', message: 'Matchup not loaded yet. Please wait.' });
+            triggerHaptic('error');
+            return;
+        }
+        if (hasPickedToday || gameStarted) {
+            addNotification({ type: 'warning', message: 'You have already picked for today or the game has started!' });
+            triggerHaptic('medium');
+            return;
+        }
+        if (userState.coins < betAmount) {
+            addNotification({ type: 'error', message: `Not enough coins! You have ${userState.coins} 🪙 but need ${betAmount} 🪙.` });
+            triggerHaptic('error');
+            return;
+        }
 
-                // Update streak based on result if user made a pick for THIS game
-                if (userPickForGame && !userPickForGame.isResultChecked) { // Only check if result hasn't been processed
-                    const userPickedTeam = userPickForGame.selectedTeam; // 'home' or 'away'
+        setTeamToConfirm(teamChoice === 'home' ? todaysMatchup.homeTeam : todaysMatchup.awayTeam);
+        setShowPickConfirmationModal(true);
+        triggerHaptic('light');
+
+    }, [todaysMatchup, hasPickedToday, gameStarted, userState.coins, betAmount, addNotification, triggerHaptic]);
+
+    /**
+     * Confirms and processes the pick after modal confirmation.
+     */
+    const confirmPick = useCallback(() => {
+        setShowPickConfirmationModal(false);
+        if (!teamToConfirm) return;
+
+        const teamChoice = teamToConfirm.abbr === todaysMatchup.homeTeam.abbr ? 'home' : 'away';
+
+        setUserState(prev => ({
+            ...prev,
+            todaysPick: {
+                matchupId: todaysMatchup.id,
+                selectedTeam: teamChoice,
+                timestamp: new Date().toISOString(),
+                date: today,
+                bet: betAmount // Store the bet amount
+            },
+            lastPickDate: today,
+            totalPicks: prev.totalPicks + 1,
+            weeklyStats: {
+                ...prev.weeklyStats,
+                picks: prev.weeklyStats.picks + 1
+            },
+            coins: prev.coins - betAmount, // Deduct coins on pick
+            totalCoinsSpent: prev.totalCoinsSpent + betAmount,
+            bettingHistory: [...prev.bettingHistory, {
+                matchupId: todaysMatchup.id,
+                pickDate: today,
+                selectedTeam: teamChoice,
+                betAmount: betAmount,
+                won: null // Will be updated after result
+            }]
+        }));
+
+        addNotification({
+            type: 'info',
+            message: `You picked: ${teamToConfirm.name} for ${betAmount} 🪙. Good luck!`
+        });
+        playSound('pick_select');
+
+    }, [teamToConfirm, todaysMatchup, today, betAmount, setUserState, addNotification, playSound]);
+
+    // Add this function inside your App component
+    const fetchAndDisplayResult = useCallback(async () => {
+        if (!todaysMatchup || resultLoading) return;
+        
+        setResultLoading(true);
+        try {
+            const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport, todaysMatchup.startTime);
+            if (result) {
+                setGameResult(result);
+                setTodaysGameResult(result); // Cache it
+                
+                // Update streak, coins, and betting history based on result if user made a pick
+                if (hasPickedToday && userState.todaysPick && result.completedAt) {
+                    const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
                     const actualWinner = result.winner; // 'home', 'away', or 'tie'
+                    const bet = userState.todaysPick.bet || 0; // Get the bet amount from the pick
                     let isCorrect = userPickedTeam === actualWinner;
 
-                    // Treat ties as correct to keep streak going (as per prompt for original)
+                    // Treat ties as correct to keep streak going
                     if (actualWinner === 'tie') {
                         isCorrect = true;
                     }
 
                     setIsStreakIncreasing(isCorrect); // Set for animation
-                    
+
                     setUserState(prev => {
-                        let newCurrentStreak = prev.currentStreak;
-                        let newBestStreak = prev.bestStreak;
-                        let newCorrectPicks = prev.correctPicks;
-                        let newWeeklyCorrect = prev.weeklyStats.correct;
+                        const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
+                        const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
+                        const winnings = isCorrect ? bet * 2 : 0;
+                        const updatedCoins = prev.coins + winnings; // Add winnings if correct
+                        const updatedTotalCoinsEarned = prev.totalCoinsEarned + winnings;
 
-                        // Only update streak if it was a pending pick for today and not already checked
-                        if (prev.lastPickDate === today && prev.todaysPicks[gameId] && !prev.todaysPicks[gameId].isResultChecked) {
-                            newCorrectPicks += (isCorrect ? 1 : 0);
-                            newWeeklyCorrect += (isCorrect ? 1 : 0);
-
-                            // The streak logic here is crucial. If any pick for the day is wrong, the streak breaks.
-                            // If all picks for the day are correct, the streak continues.
-                            // This means we need to check ALL picks for the day to determine streak.
-                            // For simplicity, we'll update the streak based on *this* pick's correctness for now.
-                            // A more robust system would calculate streak daily after all games are known.
-                            // The prompt doesn't specify multi-game streak logic deeply, so I'll follow single-game behavior for now.
-
-                            newCurrentStreak = isCorrect ? (prev.currentStreak + 1) : 0;
-                            newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
-                        }
-
-                        // Mark this specific pick as checked
-                        const updatedTodaysPicks = {
-                            ...prev.todaysPicks,
-                            [gameId]: { ...prev.todaysPicks[gameId], isResultChecked: true, resultStatus: isCorrect ? 'correct' : 'wrong' }
-                        };
+                        // Update betting history for this game
+                        const updatedBettingHistory = prev.bettingHistory.map(entry =>
+                            entry.matchupId === todaysMatchup.id && entry.pickDate === today
+                                ? { ...entry, won: isCorrect, winnings: winnings }
+                                : entry
+                        );
 
                         return {
                             ...prev,
-                            correctPicks: newCorrectPicks,
+                            correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
                             currentStreak: newCurrentStreak,
                             bestStreak: newBestStreak,
                             weeklyStats: {
                                 ...prev.weeklyStats,
-                                correct: newWeeklyCorrect
+                                correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0)
                             },
-                            todaysPicks: updatedTodaysPicks // Update the pick status
+                            coins: updatedCoins,
+                            totalCoinsEarned: updatedTotalCoinsEarned,
+                            bettingHistory: updatedBettingHistory
                         };
                     });
 
-                    // Update dailyPicks in local storage to mark it as checked
-                    setDailyPicks(prev => ({
-                        ...prev,
-                        [gameId]: { ...prev[gameId], isResultChecked: true, resultStatus: isCorrect ? 'correct' : 'wrong' }
-                    }));
-
                     const resultMessage = isCorrect ?
-                        `🎉 Correct! ${result.winner === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.name : todaysGames.find(g => g.id === gameId).awayTeam.name} won ${result.homeScore}-${result.awayScore}.` :
-                        `😞 Wrong! You picked ${userPickForGame.selectedTeam === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.abbr : todaysGames.find(g => g.id === gameId).awayTeam.abbr}, but ${result.winner === 'home' ? todaysGames.find(g => g.id === gameId).homeTeam.name : todaysGames.find(g => g.id === gameId).awayTeam.name} won ${result.homeScore}-${result.awayScore}.`;
+                        `🎉 Correct! ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You won ${bet * 2} 🪙!` :
+                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.abbr : todaysMatchup.awayTeam.abbr}, but ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You lost ${bet} 🪙.`;
 
                     addNotification({
                         type: isCorrect ? 'success' : 'error',
                         message: resultMessage
                     });
                     playSound(isCorrect ? 'pick_correct' : 'pick_wrong');
+                    triggerHaptic(isCorrect ? 'success' : 'error');
 
                     setTimeout(() => setIsStreakIncreasing(false), 1500);
                 }
             }
         } catch (error) {
-            console.error(`Error fetching game result for game ${gamePk}:`, error);
-            addNotification({ type: 'error', message: `Failed to fetch result for game ${gamePk}.` });
+            console.error('Error fetching game result for display:', error);
+            addNotification({ type: 'error', message: 'Failed to fetch game result.' });
         } finally {
-            setResultLoadingStates(prev => ({ ...prev, [gameId]: false }));
+            setResultLoading(false);
         }
-    }, [todaysGames, dailyPicks, gameResultsHistory, today, setUserState, setTodaysGameResultsDisplay, setGameResultsHistory, addNotification, playSound, setDailyPicks]);
+    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, userState.coins, userState.bettingHistory, today, setUserState, addNotification, playSound, triggerHaptic]);
 
+    // Add these useEffect hooks in your App component
 
-    // Auto-fetch results when games should be finished
+    // Auto-fetch results when game should be finished
     useEffect(() => {
-        // Iterate through all todaysGames
-        todaysGames.forEach(game => {
-            // Only fetch if game has started and its result hasn't been fetched/cached for this session
-            const gameAlreadyStarted = gameStartedStates[game.id];
-            const gameResultDisplayed = todaysGameResultsDisplay[game.id];
-            const gameLoadingResult = resultLoadingStates[game.id];
-            const userPickMade = dailyPicks[game.id] && dailyPicks[game.id].isSubmitted; // Only check results for submitted picks
+        // Only fetch if we have a matchup, game has started, and we don't already have the result
+        if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
+        
+        const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
+        const now = new Date();
+        
+        if (now > estimatedGameEnd) {
+            // Game should be over, fetch result immediately
+            fetchAndDisplayResult();
+        } else {
+            // Set timer to fetch when game should be over, plus a 30min buffer
+            const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
+            if (timeUntilCheck > 0) {
+                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
+                const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
+                return () => clearTimeout(timerId);
+            }
+        }
+    }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
 
-            if (!gameAlreadyStarted || gameResultDisplayed || gameLoadingResult || !userPickMade) {
-                return; // Skip if not started, already has result, already loading, or no submitted pick
-            }
-            
-            const estimatedGameEnd = new Date(new Date(game.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours after start
-            const now = new Date();
-            
-            if (now > estimatedGameEnd) {
-                // Game should be over, fetch result immediately
-                console.log(`Auto-fetching result for game ${game.id} (estimated end passed).`);
-                fetchAndDisplayResult(game.gamePk, game.sport, game.startTime, game.id);
+    // Load cached result on page load
+    useEffect(() => {
+        if (todaysGameResult && !gameResult) {
+            // Ensure the cached result is for today's game
+            const cachedResultDate = new Date(todaysGameResult.completedAt).toISOString().split('T')[0];
+            if (cachedResultDate === today && todaysMatchup && todaysGameResult.gameId === todaysMatchup.id) {
+                setGameResult(todaysGameResult);
             } else {
-                // Set timer to fetch when game should be over, plus a 30min buffer
-                const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
-                if (timeUntilCheck > 0) {
-                    console.log(`Scheduling result check for game ${game.id} in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
-                    // Use a unique timeout per game
-                    const timerId = setTimeout(() => {
-                        fetchAndDisplayResult(game.gamePk, game.sport, game.startTime, game.id);
-                    }, timeUntilCheck);
-                    return () => clearTimeout(timerId); // Cleanup for the current game
-                }
+                // If cached result is old or for a different game, clear it
+                setTodaysGameResult(null);
             }
-        });
-    }, [todaysGames, gameStartedStates, todaysGameResultsDisplay, resultLoadingStates, fetchAndDisplayResult, dailyPicks]);
+        }
+    }, [todaysGameResult, gameResult, today, todaysMatchup, setTodaysGameResult]);
 
 
     const handleToggleTheme = useCallback(() => {
@@ -2449,15 +2558,17 @@ const App = ({ user }) => {
             theme: prev.theme === 'dark' ? 'light' : 'dark'
         }));
         playSound('button_click');
-    }, [setUserState, playSound]);
+        triggerHaptic('light');
+    }, [setUserState, playSound, triggerHaptic]);
 
     const handleToggleSound = useCallback(() => {
         setUserState(prev => ({
             ...prev,
             soundEnabled: !prev.soundEnabled
         }));
+        triggerHaptic('light');
         // playSound logic is inside useSound, so it will react to the state change
-    }, [setUserState]);
+    }, [setUserState, triggerHaptic]);
 
     // Apply theme to body/html element
     useEffect(() => {
@@ -2512,15 +2623,15 @@ const App = ({ user }) => {
         const milestones = [5, 10, 15, 20, 25, 30];
         if (userState.currentStreak > 0 && milestones.includes(userState.currentStreak)) {
             // Don't spam - only show once per milestone
-            const hasSharedThisMilestone = localStorage.getItem(`shared_milestone_${userState.currentStreak}`);
+            const hasSharedThisMilestone = localStorage.getItem(`shared_milestone_${userState.currentStreak}_${userId}`);
             if (!hasSharedThisMilestone) {
                 setTimeout(() => {
                     setShowShareModal(true);
-                    localStorage.setItem(`shared_milestone_${userState.currentStreak}`, 'true');
+                    localStorage.setItem(`shared_milestone_${userState.currentStreak}_${userId}`, 'true');
                 }, 2000); // 2 second delay for celebration
             }
         }
-    }, [userState.currentStreak, setShowShareModal]);
+    }, [userState.currentStreak, setShowShareModal, userId]);
 
     // Update leaderboard whenever user's streak or relevant stats change
     useEffect(() => {
@@ -2536,6 +2647,58 @@ const App = ({ user }) => {
         userState.displayName,
         updateLeaderboard
     ]);
+
+    // Daily Reward System Check
+    useEffect(() => {
+        const checkDailyBonus = () => {
+            const lastBonusDate = userState.lastDailyBonus ? new Date(userState.lastDailyBonus) : null;
+            const now = new Date();
+            const todayISO = now.toISOString().split('T')[0];
+
+            if (!lastBonusDate || lastBonusDate.toISOString().split('T')[0] !== todayISO) {
+                // It's a new day, grant bonus
+                setUserState(prev => ({
+                    ...prev,
+                    coins: prev.coins + DAILY_BONUS_AMOUNT,
+                    totalCoinsEarned: prev.totalCoinsEarned + DAILY_BONUS_AMOUNT,
+                    lastDailyBonus: now.toISOString()
+                }));
+                setShowDailyRewardModal(true);
+                playSound('coin_collect');
+                addNotification({ type: 'success', message: `Daily bonus! +${DAILY_BONUS_AMOUNT} 🪙` });
+            }
+        };
+        // Check only after initial load and if a real user (or test user but not anonymous)
+        if (!matchupLoading && user && (!user.isAnonymous || user.isTestUser)) {
+            checkDailyBonus();
+        }
+    }, [matchupLoading, user, userState.lastDailyBonus, setUserState, playSound, addNotification]);
+
+
+    // Achievement System Check
+    useEffect(() => {
+        ACHIEVEMENTS_LIST.forEach(achievement => {
+            if (!userState.achievements.includes(achievement.id) && achievement.checkCondition(userState)) {
+                setUserState(prev => ({
+                    ...prev,
+                    achievements: [...prev.achievements, achievement.id],
+                    coins: prev.coins + achievement.coinReward,
+                    totalCoinsEarned: prev.totalCoinsEarned + achievement.coinReward
+                }));
+                setUnlockedAchievement(achievement);
+                setShowAchievementModal(true);
+                addNotification({ type: 'success', message: `Achievement unlocked: ${achievement.title}!` });
+                playSound('achievement_unlock');
+            }
+        });
+    }, [userState, setUserState, playSound, addNotification]); // Re-run when userState changes
+
+
+    // Swipe gesture implementation
+    const { onTouchStart, onTouchMove, onTouchEnd } = useSwipeGesture(
+        () => handlePickInitiate('away'), // Swipe left for away team
+        () => handlePickInitiate('home')  // Swipe right for home team
+    );
 
 
     // Simple loading check - no complex logic
@@ -2580,7 +2743,7 @@ const App = ({ user }) => {
     }
 
     // CLEAN ERROR STATE - NO FALLBACKS
-    if (!matchupLoading && todaysGames.length === 0) {
+    if (!matchupLoading && !todaysMatchup) {
         return (
             <div className="min-h-screen bg-bg-primary text-text-primary flex items-center justify-center">
                 <style>
@@ -2658,7 +2821,7 @@ const App = ({ user }) => {
 
     return (
         <div
-            className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center relative overflow-hidden transition-colors duration-300"
+            className="min-h-screen bg-bg-primary text-text-primary font-inter p-4 flex flex-col items-center relative overflow-hidden transition-colors duration-300 app-background" // Added app-background
             style={{
                 // This section sets the CSS variables for the entire application,
                 // making them accessible to TailwindCSS classes and custom CSS.
@@ -2717,7 +2880,6 @@ const App = ({ user }) => {
                     --accent-win: #22c55e;
                     --success: #10b981;
                     --error: #ef4444;
-                    --warning: #f59e0b;
                 }
 
                 .dark {
@@ -2726,6 +2888,16 @@ const App = ({ user }) => {
                     --bg-tertiary: #2a2a2a;
                     --text-primary: #ffffff;
                     --text-secondary: #a0a0a0;
+                }
+
+                /* Enhanced Gradient Background for the App */
+                .app-background {
+                    background: 
+                        radial-gradient(circle at 20% 50%, var(--accent-info)10 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, var(--accent-win)08 0%, transparent 50%),
+                        var(--bg-primary);
+                    background-size: cover;
+                    background-attachment: fixed;
                 }
 
                 /* PREMIUM MATCHUP CARD */
@@ -2742,8 +2914,6 @@ const App = ({ user }) => {
                     position: relative;
                     overflow: hidden;
                     transition: all var(--transition-normal);
-                    /* Priority Fix: Add proper bottom padding for indicators */
-                    padding-bottom: 3.5rem; /* Space for indicators */
                 }
 
                 .matchup-card::before {
@@ -2769,32 +2939,33 @@ const App = ({ user }) => {
                     padding: var(--space-lg);
                 }
 
+                /* TEAM CARD COLOR IMPLEMENTATION - FIXED */
                 .team-card {
-                    /* CRITICAL: Exact dimensions for symmetry */
-                    min-height: 320px; /* Priority Fix: Increased for content */
-                    max-width: 100%; /* Priority Fix: ensure max-width is 100% */
+                    /* Remove the old background and use CSS variables properly */
+                    background: linear-gradient(135deg, 
+                        rgba(var(--team-primary-rgb), 0.15), 
+                        rgba(var(--team-secondary-rgb), 0.08), 
+                        var(--bg-secondary)
+                    ) !important; /* Force override */
+                    
+                    border: 2px solid rgba(var(--team-primary-rgb), 0.4) !important;
+                    
+                    /* Rest of existing styles... */
+                    min-height: 160px;
                     width: 100%;
-                    aspect-ratio: 3/4; /* Maintain consistent proportions */
+                    aspect-ratio: 3/4;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
                     gap: var(--space-sm);
-                    
-                    /* Visual design */
-                    background: var(--bg-secondary);
-                    border: 2px solid var(--bg-tertiary);
                     border-radius: var(--radius-xl);
                     padding: var(--space-lg);
-                    position: relative; /* Added for .color-accent positioning */
-                    overflow: hidden; /* Added for .color-accent border-radius */
-                    
-                    /* Interactions */
+                    position: relative;
+                    overflow: hidden;
                     cursor: pointer;
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Enhanced transition */
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                     transform: scale(1);
-                    
-                    /* Accessibility */
                     outline: none;
                 }
 
@@ -2804,22 +2975,44 @@ const App = ({ user }) => {
                 }
 
                 .team-card:hover:not(.disabled) {
-                    transform: translateY(-4px) scale(1.03); /* Enhanced hover effect */
-                    border-color: var(--team-primary);
+                    transform: translateY(-4px) scale(1.03) !important;
+                    background: linear-gradient(135deg, 
+                        rgba(var(--team-primary-rgb), 0.25), 
+                        rgba(var(--team-secondary-rgb), 0.15), 
+                        var(--bg-secondary)
+                    ) !important;
+                    border-color: rgb(var(--team-primary-rgb)) !important;
                     box-shadow: 
-                        0 20px 25px -5px rgba(0, 0, 0, 0.1),
-                        0 10px 10px -5px rgba(0, 0, 0, 0.04),
-                        0 0 30px var(--team-primary)30; /* Team color glow effect */
+                        0 20px 25px -5px rgba(0, 0, 0, 0.2),
+                        0 0 30px rgba(var(--team-primary-rgb), 0.4) !important;
                 }
 
                 .team-card.selected {
-                    border-color: var(--team-primary);
                     background: linear-gradient(135deg, 
-                        var(--team-primary)10, 
+                        rgba(var(--team-primary-rgb), 0.35), 
+                        rgba(var(--team-secondary-rgb), 0.20), 
                         var(--bg-secondary)
-                    );
-                    transform: scale(1.02);
+                    ) !important;
+                    border-color: rgb(var(--team-primary-rgb)) !important;
+                    transform: scale(1.05) !important;
+                    animation: team-select 0.3s ease-out;
                 }
+                
+                /* Enhanced glow effect for selected card */
+                .team-card.selected::before {
+                    content: '';
+                    position: absolute;
+                    inset: -2px;
+                    background: linear-gradient(45deg, 
+                        rgb(var(--team-primary-rgb)), 
+                        rgb(var(--team-secondary-rgb))
+                    );
+                    border-radius: inherit;
+                    z-index: -1;
+                    opacity: 0.3;
+                    filter: blur(8px);
+                }
+
 
                 .team-card.disabled {
                     opacity: 0.5;
@@ -2886,7 +3079,7 @@ const App = ({ user }) => {
                     50% { opacity: 0.7; }
                 }
 
-                /* Mobile timer and date fixes */
+                /* MOBILE OPTIMIZATIONS */
                 @media (max-width: 640px) {
                     .team-selection-container {
                         grid-template-columns: 1fr 50px 1fr;
@@ -2895,7 +3088,7 @@ const App = ({ user }) => {
                     }
                     
                     .team-card {
-                        min-height: 280px; /* Priority Fix: Scaled for mobile */
+                        min-height: 140px;
                         padding: var(--space-md);
                     }
                     
@@ -2931,8 +3124,20 @@ const App = ({ user }) => {
                     from { transform: translateX(100%); opacity: 0; }
                     to { transform: translateX(0); opacity: 1; }
                 }
+                @keyframes bounce {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-10px); }
+                }
+                @keyframes pulse {
+                    0%, 100% { transform: scale(1); }
+                    50% { transform: scale(1.05); }
+                }
+                
                 .animate-fadeInUp { animation: fadeInUp 0.5s ease-out forwards; }
                 .animate-slideInRight { animation: slideInRight 0.5s ease-out forwards; }
+                .animate-bounce { animation: bounce 1s infinite; }
+                .animate-pulse { animation: pulse 1.5s infinite; }
+
 
                 /* Leaderboard Styles */
                 .leaderboard-modal {
@@ -3023,7 +3228,7 @@ const App = ({ user }) => {
                 background: linear-gradient(135deg, #C0C0C0, #A0A0A0); /* Silver */
                 color: #1a1a1a;
                 }
-
+                
                 .rank-badge.top-100 {
                 background: linear-gradient(135deg, #CD7F32, #8B4513); /* Bronze */
                 color: #fff;
@@ -3094,311 +3299,6 @@ const App = ({ user }) => {
                     }
                 }
 
-                /* Carousel container */
-                .game-carousel-container {
-                  position: relative;
-                  width: 100%;
-                  display: flex;
-                  align-items: center;
-                  gap: 1rem;
-                }
-
-                /* Viewport (visible area) */
-                .carousel-viewport {
-                  flex: 1;
-                  overflow: hidden;
-                  position: relative;
-                  border-radius: 1.5rem;
-                  /* Priority Fix: Add visual feedback for swipe interactions */
-                  cursor: grab;
-                }
-
-                .carousel-viewport.swiping {
-                    cursor: grabbing;
-                }
-
-                /* Track (slides horizontally) */
-                .carousel-track {
-                  display: flex;
-                  /* Width handled by JS based on games.length */
-                  transition: transform 0.3s ease-out;
-                  /* Priority Fix: Disable transition during drag */
-                  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                }
-
-                .carousel-track.dragging {
-                    transition: none;
-                }
-
-                /* Individual game card wrapper within track */
-                .game-card-wrapper {
-                  /* flex: 0 0 33.333%; */ /* This is now dynamically set in JS */
-                  padding: 1rem;
-                  box-sizing: border-box;
-                  width: 100%; /* Each card takes 100% of its wrapper */
-                }
-
-                .game-card {
-                    /* Ensure game-card itself takes full width of its wrapper */
-                    width: 100%;
-                }
-
-                /* Navigation arrows */
-                .carousel-arrow {
-                  background: var(--bg-secondary);
-                  border: 2px solid var(--bg-tertiary);
-                  border-radius: 50%;
-                  width: 48px;
-                  height: 48px;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  cursor: pointer;
-                  flex-shrink: 0;
-                  color: var(--text-primary); /* Icon color */
-                  /* Priority Fix: Proper touch targets */
-                  min-width: 44px;
-                  min-height: 44px;
-                  /* Priority Fix: Arrow Button Polish */
-                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                }
-
-                .carousel-arrow:hover:not(:disabled) {
-                  background: var(--accent-info);
-                  color: white;
-                  transform: scale(1.05); /* Adjusted from 1.1 */
-                  border-color: var(--accent-info); /* Priority Fix: border-color change on hover */
-                  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-info) 25%, transparent); /* Priority Fix: Add stronger shadow */
-                }
-
-                .carousel-arrow:disabled {
-                  opacity: 0.4;
-                  cursor: not-allowed;
-                  /* Priority Fix: Disabled state background/border */
-                  background: var(--bg-tertiary);
-                  border-color: var(--bg-tertiary);
-                }
-
-                /* Indicator dots */
-                .carousel-indicators {
-                  /* Priority Fix: Polished indicators */
-                  position: absolute;
-                  bottom: 1rem; /* Position within card padding */
-                  left: 50%;
-                  transform: translateX(-50%);
-                  width: auto; /* Don't force full width */
-                  display: flex;
-                  gap: 0.75rem; /* Increased spacing */
-                  align-items: center;
-                }
-
-                .indicator {
-                  /* Priority Fix: Polished indicators */
-                  width: 10px; /* Slightly larger */
-                  height: 10px;
-                  border-radius: 50%;
-                  border: none;
-                  background: transparent; /* Changed to transparent, actual dot is ::before */
-                  cursor: pointer;
-                  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                  /* Priority Fix: Ensure proper touch targets */
-                  min-width: 24px; /* Larger touch area */
-                  min-height: 24px;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                }
-
-                .indicator::before {
-                    content: '';
-                    width: 10px; /* Actual dot size */
-                    height: 10px;
-                    border-radius: 50%;
-                    background: var(--bg-tertiary); /* Dot color from CSS variable */
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                }
-
-                .indicator.active::before {
-                  background: var(--accent-info);
-                  transform: scale(1.2); /* Less aggressive scaling */
-                  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-info) 30%, transparent);
-                }
-
-                .indicator:hover:not(.active)::before {
-                    background: color-mix(in srgb, var(--accent-info) 50%, var(--bg-tertiary));
-                    transform: scale(1.1);
-                }
-
-                /* Mobile optimizations */
-                @media (max-width: 640px) {
-                  .carousel-arrow {
-                    width: 40px;
-                    height: 40px;
-                  }
-                  
-                  .game-carousel-container {
-                    gap: 0.5rem;
-                  }
-
-                  .carousel-indicators {
-                    bottom: 1rem; /* Consistent on mobile too */
-                  }
-                }
-                .game-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    /* Priority Fix: Reduce spacing */
-                    margin-bottom: 0.5rem;
-                    /* Priority Fix: Add gap between header items */
-                    gap: 0.5rem;
-                    padding: 0 1rem; /* Add horizontal padding */
-                }
-
-                @media (max-width: 640px) {
-                    .game-header {
-                        padding: 0.75rem; /* Priority Fix: Scaled for mobile */
-                        flex-direction: column; /* Priority Fix: Stack on mobile */
-                        text-align: center;
-                        gap: 0.25rem;
-                    }
-                }
-
-                .sport-badge {
-                    /* Priority Fix: Standardize font sizes and weights */
-                    font-size: 0.75rem; /* 12px */
-                    font-weight: 600;
-                    letter-spacing: 0.025em;
-                    background-color: var(--accent-info);
-                    color: white;
-                    padding: 0.25rem 0.5rem;
-                    border-radius: 9999px; /* Full pill shape */
-                }
-
-                .venue {
-                    /* Priority Fix: Standardize font sizes and weights */
-                    font-size: 0.875rem; /* 14px */
-                    font-weight: 400;
-                    color: var(--text-secondary);
-                }
-
-                .timer-text { /* This is the specific game time display component's text */
-                    /* Priority Fix: Standardize font sizes and weights */
-                    font-size: 0.875rem; /* 14px */
-                    margin-bottom: 0.5rem;
-                    color: var(--text-secondary);
-                }
-
-                .game-time-large { /* This is the new class for the "Starts in" countdown */
-                    /* Priority Fix: Standardize font sizes and weights */
-                    font-size: 1.125rem; /* 18px */
-                    font-weight: 600;
-                    color: var(--text-primary);
-                }
-
-                /* Priority Fix: Pick Status Styling */
-                .pick-status { /* This is the div in GameResultDisplay, not GameStatusBadge */
-                    background: linear-gradient(135deg, 
-                        color-mix(in srgb, var(--success) 10%, var(--bg-tertiary)),
-                        var(--bg-tertiary)
-                    );
-                    border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
-                    font-weight: 500;
-                }
-
-                .pick-status.game-started {
-                    background: linear-gradient(135deg, 
-                        color-mix(in srgb, var(--warning) 10%, var(--bg-tertiary)),
-                        var(--bg-tertiary)
-                    );
-                    border-color: color-mix(in srgb, var(--warning) 20%, transparent);
-                }
-
-                /* Priority Fix: Submit Button Positioning & Styling */
-                .submit-section {
-                    border-top: 1px solid var(--bg-tertiary);
-                    padding: 1.5rem 1rem 1rem;
-                    background: linear-gradient(to bottom, transparent, var(--bg-secondary));
-                }
-
-                .submit-content {
-                    text-align: center;
-                    max-width: 280px;
-                    margin: 0 auto;
-                }
-
-                .submit-button {
-                    background: linear-gradient(135deg, var(--success), color-mix(in srgb, var(--success) 80%, #000));
-                    color: white;
-                    font-weight: 600;
-                    padding: 0.875rem 1.5rem;
-                    border-radius: 0.75rem;
-                    border: none;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    width: 100%;
-                    justify-content: center;
-                    box-shadow: 0 4px 12px color-mix(in srgb, var(--success) 25%, transparent);
-                }
-
-                .submit-button:hover {
-                    transform: translateY(-1px);
-                    box-shadow: 0 6px 16px color-mix(in srgb, var(--success) 30%, transparent);
-                }
-
-                .submit-helper-text {
-                    font-size: 0.75rem;
-                    color: var(--text-secondary);
-                    margin-top: 0.5rem;
-                    line-height: 1.4;
-                }
-
-                /* Priority Fix: Game Status Indicators Styling */
-                .status-badge {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.25rem;
-                    padding: 0.5rem 0.75rem;
-                    border-radius: 0.5rem;
-                    font-size: 0.875rem;
-                    font-weight: 500;
-                    margin-top: 0.75rem;
-                }
-
-                .status-badge.available {
-                    background: color-mix(in srgb, var(--accent-info) 10%, var(--bg-tertiary));
-                    color: var(--accent-info);
-                    border: 1px solid color-mix(in srgb, var(--accent-info) 20%, transparent);
-                }
-
-                .status-badge.picked {
-                    background: color-mix(in srgb, var(--success) 10%, var(--bg-tertiary));
-                    color: var(--success);
-                    border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
-                }
-
-                .status-badge.locked {
-                    background: color-mix(in srgb, var(--warning) 10%, var(--bg-tertiary));
-                    color: var(--warning);
-                    border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
-                }
-
-                .status-badge.correct {
-                    background: color-mix(in srgb, var(--success) 15%, var(--bg-tertiary));
-                    color: var(--success);
-                    border: 1px solid var(--success);
-                }
-
-                .status-badge.incorrect {
-                    background: color-mix(in srgb, var(--error) 15%, var(--bg-tertiary));
-                    color: var(--error);
-                    border: 1px solid var(--error);
-                }
-
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3412,49 +3312,121 @@ const App = ({ user }) => {
                     onOpenLeaderboard={() => setShowLeaderboard(true)}
                 />
 
-                {/* Multi-game carousel section */}
-                {todaysGames.length > 0 ? (
-                    <div className="matchup-card mb-6 relative"> {/* Removed pb-10, now handled by css padding-bottom on matchup-card */}
-                        <GameCarousel
-                            games={todaysGames}
-                            currentIndex={currentGameIndex}
-                            onIndexChange={setCurrentGameIndex}
-                            picks={dailyPicks}
-                            onPick={handleMultiPick}
-                            disabled={false} // Individual GameCard will handle its own disabled state
-                            timeStates={timeStates}
-                            setTimeStates={setTimeStates}
-                            gameStartedStates={gameStartedStates}
-                            setGameStartedStates={setGameStartedStates}
-                            gameResults={todaysGameResultsDisplay}
-                            fetchAndDisplayResult={fetchAndDisplayResult}
-                            resultLoadingStates={resultLoadingStates}
+                {/* Today's Matchup Card */}
+                <div className="matchup-card mb-6"
+                    onTouchStart={onTouchStart}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
+                > {/* Applied matchup-card styling */}
+                    <div className="flex justify-between items-center mb-4 px-6 pt-6"> {/* Added padding to align with matchup-card */}
+                        <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
+                            {todaysMatchup.sport}
+                        </span>
+                        {/* Data source will always be live now */}
+                        <span className="text-xs text-text-secondary">
+                            📡 Live
+                        </span>
+                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
+                    </div>
+
+                    {/* Team vs Team using the new team-selection-container grid */}
+                    <div className="team-selection-container">
+                        <EnhancedTeamCard
+                            team={todaysMatchup.homeTeam}
+                            isSelected={userState.todaysPick?.selectedTeam === 'home'}
+                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
+                            onClick={() => handlePickInitiate('home')}
+                            disabled={hasPickedToday || gameStarted}
                         />
+
+                        <div className="vs-divider">VS</div>
+
+                        <EnhancedTeamCard
+                            team={todaysMatchup.awayTeam}
+                            isSelected={userState.todaysPick?.selectedTeam === 'away'}
+                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
+                            onClick={() => handlePickInitiate('away')}
+                            disabled={hasPickedToday || gameStarted}
+                        />
+                    </div>
+
+                    {/* Betting Interface */}
+                    {!hasPickedToday && !gameStarted && (
+                        <BettingInterface 
+                            onBetChange={setBetAmount} 
+                            userCoins={userState.coins} 
+                            currentBet={betAmount} 
+                        />
+                    )}
+
+                    {/* Enhanced Game Time Display */}
+                    <div className="text-center mb-6 px-6">
+                        {todaysMatchup?.startTime ? (
+                            <EnhancedGameTimeDisplay 
+                                startTime={todaysMatchup.startTime} 
+                                setTimeLeft={setTimeLeft}
+                                matchupId={todaysMatchup.id}
+                            />
+                        ) : (
+                            <div className="text-red-500">⚠️ No game time available</div>
+                        )}
                         
-                        {/* Submit button (show when picks made and games haven't started for the current game) */}
-                        {Object.keys(dailyPicks).length > 0 && !gameStartedStates[todaysGames[currentGameIndex]?.id] && (
-                            <div className="submit-section">
-                                <div className="submit-content">
-                                    <button
-                                        onClick={submitAllPicks}
-                                        className="submit-button"
-                                    >
-                                        <span className="submit-icon">🚀</span>
-                                        <span className="submit-text">
-                                            Submit {Object.keys(dailyPicks).length} Pick{Object.keys(dailyPicks).length > 1 ? 's' : ''}
-                                        </span>
-                                    </button>
-                                    <p className="submit-helper-text">
-                                        You can modify picks until games start
-                                    </p>
-                                </div>
+                        {/* Show game result if available, otherwise show timer */}
+                        {gameResult ? (
+                            <div>
+                                <p className="text-lg font-semibold text-accent-win mb-2">
+                                    🏆 Game Finished!
+                                </p>
+                                <GameResultDisplay 
+                                    result={gameResult} 
+                                    todaysMatchup={todaysMatchup} 
+                                    userPick={userState.todaysPick} 
+                                />
                             </div>
+                        ) : (
+                            <p className="text-lg font-semibold text-text-primary">
+                                ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
+                            </p>
                         )}
                     </div>
-                ) : (
-                    // Show loading or no games state
-                    <div className="text-center p-6">No games available today</div>
-                )}
+                    
+                    {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
+                    {(hasPickedToday || gameStarted) && (
+                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
+                            <p className="font-semibold text-text-primary">
+                                {hasPickedToday ?
+                                    `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
+                                    '🔒 Game has started!'
+                                }
+                            </p>
+                            <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>
+                            {/* Share Pick Button (Option B) */}
+                            {hasPickedToday && userState.currentStreak > 0 && (
+                                <div className="mt-4 text-center">
+                                    <EnhancedButton
+                                        onClick={() => setShowShareModal(true)}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        📱 Share This Pick
+                                    </EnhancedButton>
+                                </div>
+                            )}
+
+                            {/* Add this inside the "hasPickedToday || gameStarted" section */}
+                            {gameStarted && !gameResult && (
+                                <div className="mt-3">
+                                    <EnhancedButton
+                                        onClick={fetchAndDisplayResult}
+                                        loading={resultLoading}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                                    >
+                                        {resultLoading ? 'Checking...' : '🔍 Check Game Result'}
+                                    </EnhancedButton>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
 
                 {/* Leaderboard Preview Section */}
                 <div className="leaderboard-section mb-6">
@@ -3467,54 +3439,48 @@ const App = ({ user }) => {
                 </div>
 
 
-                {/* Simple Stats */}
+                {/* Simple Stats - Replaced with Enhanced StatsCard */}
                 <div className="grid grid-cols-3 gap-4 text-center mb-6">
-                    <div className="bg-bg-secondary rounded-xl p-4 shadow-md border border-bg-tertiary">
-                        <div className="text-2xl font-bold text-accent-info">{userState.totalPicks}</div>
-                        <div className="text-xs text-text-secondary">Total Picks</div>
-                    </div>
-                    <div className="bg-bg-secondary rounded-xl p-4 shadow-md border border-bg-tertiary">
-                        <div className="text-2xl font-bold text-accent-win">{userState.correctPicks}</div>
-                        <div className="text-xs text-text-secondary">Correct</div>
-                    </div>
-                    <div className="bg-bg-secondary rounded-xl p-4 shadow-md border border-bg-tertiary">
-                        <div className="text-2xl font-bold text-purple-400">
-                            {userState.totalPicks > 0 ? Math.round((userState.correctPicks / userState.totalPicks) * 100) : 0}%
-                        </div>
-                        <div className="text-xs text-text-secondary">Accuracy</div>
-                    </div>
+                    <StatsCard title="Total Picks" value={userState.totalPicks} color="text-accent-info" />
+                    <StatsCard title="Correct" value={userState.correctPicks} color="text-accent-win" />
+                    <StatsCard 
+                        title="Accuracy" 
+                        value={`${userState.totalPicks > 0 ? Math.round((userState.correctPicks / userState.totalPicks) * 100) : 0}%`} 
+                        color="text-purple-400" 
+                    />
+                    <StatsCard title="Coins" value={`${userState.coins} 🪙`} color="text-yellow-400" />
+                    <StatsCard title="Earned" value={`${userState.totalCoinsEarned} 🪙`} color="text-green-400" />
+                    <StatsCard title="Spent" value={`${userState.totalCoinsSpent} 🪙`} color="text-red-400" />
                 </div>
 
                 {/* Enhanced Settings with Logout */}
                 <div className="bg-bg-secondary p-4 rounded-xl shadow-md border border-bg-tertiary">
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
-                        <button
+                        <EnhancedButton
                             onClick={handleToggleTheme}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-accent-info text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="bg-accent-info text-white"
                             aria-label={`Toggle theme, current is ${userState.theme}`}
                         >
                             {userState.theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
-                        </button>
-                        <button
+                        </EnhancedButton>
+                        <EnhancedButton
                             onClick={() => handleToggleSound()}
-                            className={`p-3 sm:p-2 px-3 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm
-                                ${userState.soundEnabled ? 'bg-accent-win text-white' : 'bg-gray-500 text-white'}
-                            `}
+                            className={`${userState.soundEnabled ? 'bg-accent-win text-white' : 'bg-gray-500 text-white'}`}
                             aria-label={`Toggle sound effects, currently ${userState.soundEnabled ? 'on' : 'off'}`}
                         >
                             🔊 Sound
-                        </button>
+                        </EnhancedButton>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 mb-3 settings-grid">
-                        <button
+                        <EnhancedButton
                             onClick={() => setShowShareModal(true)}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="bg-gradient-to-r from-purple-600 to-pink-600 text-white"
                             aria-label="Share the app"
                         >
                             📱 Share
-                        </button>
-                        <button
+                        </EnhancedButton>
+                        <EnhancedButton
                             onClick={async () => {
                                 try {
                                     // FIX: Use complete URL for logout as well
@@ -3532,11 +3498,11 @@ const App = ({ user }) => {
                                     window.location.reload();
                                 }
                             }}
-                            className="p-3 sm:p-2 px-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md text-sm"
+                            className="bg-red-600 hover:bg-red-700 text-white"
                             aria-label="Logout from Whop account"
                         >
                             🚪 Logout
-                        </button>
+                        </EnhancedButton>
                     </div>
                 </div>
             </div>
@@ -3562,13 +3528,37 @@ const App = ({ user }) => {
                 </div>
             )}
 
+            {/* Pick Confirmation Modal */}
+            <PickConfirmationModal
+                isOpen={showPickConfirmationModal}
+                onClose={() => setShowPickConfirmationModal(false)}
+                onConfirm={confirmPick}
+                selectedTeam={teamToConfirm}
+                matchup={todaysMatchup}
+                betAmount={betAmount}
+                userCoins={userState.coins}
+            />
+
+            {/* Daily Reward Modal */}
+            <DailyRewardModal
+                isOpen={showDailyRewardModal}
+                onClose={() => setShowDailyRewardModal(false)}
+                rewardAmount={DAILY_BONUS_AMOUNT}
+            />
+
+            {/* Achievement Unlocked Modal */}
+            <AchievementUnlockedModal
+                isOpen={showAchievementModal}
+                onClose={() => setShowAchievementModal(false)}
+                achievement={unlockedAchievement}
+            />
+
             {/* Share Modal */}
             <ShareModal
                 isOpen={showShareModal}
                 onClose={() => setShowShareModal(false)}
                 userState={userState}
-                todaysGames={todaysGames}
-                currentGameIndex={currentGameIndex}
+                todaysMatchup={todaysMatchup}
                 onShare={handleShareComplete}
                 addNotification={addNotification} // Pass addNotification to ShareModal
             />
@@ -3582,6 +3572,9 @@ const App = ({ user }) => {
                 onRefreshLeaderboard={refreshLeaderboard} // Use the new refresh function
                 userId={userId}
             />
+
+            {/* Floating Share Button */}
+            <FloatingShareButton onClick={() => setShowShareModal(true)} />
 
         </div>
     );
