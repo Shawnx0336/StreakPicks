@@ -2348,49 +2348,44 @@ const App = ({ user }) => {
 
     // Load today's matchup (real or simulated)
     useEffect(() => {
-        const loadTodaysMatchup = async () => {
-            setMatchupLoading(true);
+    const loadTodaysMatchup = async () => {
+        setMatchupLoading(true);
+        let matchup = null;
+        
+        try {
+            const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
             
-            try {
-                const needsNewMatchup = !userState.lastPickDate || userState.lastPickDate !== today;
-                let matchup = null;
-                
-                if (needsNewMatchup) {
-                    matchup = await generateEnhancedDailyMatchup(new Date());
-                } else {
-                    matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
-                }
-                
-                setTodaysMatchup(matchup);
-                setIsInitialized(true);
-                
-            } catch (error) {
-                console.error('Matchup loading failed:', error);
+            if (needsNewMatchup) {
+                matchup = await generateEnhancedDailyMatchup(new Date());
+            } else {
+                matchup = await generateEnhancedDailyMatchup(new Date(userState.lastPickDate));
             }
             
-            // CRITICAL: Emergency fallback - Always ensure matchup exists
-            setTodaysMatchup(prev => {
-                if (prev) return prev; // Keep existing if we have one
-                
-                // Create emergency matchup that always works
-                console.log('🚨 Using emergency fallback matchup');
-                return {
-                    id: 'emergency-game',
-                    homeTeam: { name: 'Athletics', abbr: 'OAK', logo: '⚾', colors: ['00843D', 'EFB21E'] },
-                    awayTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
-                    sport: 'MLB',
-                    venue: 'Oakland Coliseum',
-                    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-                    status: 'upcoming'
-                };
-            });
+            console.log('✅ Successfully loaded matchup:', matchup.homeTeam.name, 'vs', matchup.awayTeam.name);
             
-            setMatchupLoading(false);
-            setIsInitialized(true);
-        };
+        } catch (error) {
+            console.error('❌ Matchup loading failed, using emergency fallback:', error);
+            
+            // Emergency fallback
+            matchup = {
+                id: 'emergency-game',
+                homeTeam: { name: 'Athletics', abbr: 'OAK', logo: '⚾', colors: ['00843D', 'EFB21E'] },
+                awayTeam: { name: 'Astros', abbr: 'HOU', logo: '⚾', colors: ['002D62', 'EB6E1F'] },
+                sport: 'MLB',
+                venue: 'Oakland Coliseum',
+                startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+                status: 'upcoming'
+            };
+        }
+        
+        // Always set a matchup (either real or emergency)
+        setTodaysMatchup(matchup);
+        setMatchupLoading(false);
+        setIsInitialized(true);
+    };
 
-        loadTodaysMatchup();
-    }, [today, userState.lastPickDate]);
+    loadTodaysMatchup();
+}, [today, userState.lastPickDate]);
 
 
     // Determine if user has picked today (only if todaysMatchup is available)
