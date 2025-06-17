@@ -320,52 +320,62 @@ const safeParseDate = (dateInput) => {
 
 
 // MLB Team Colors
-const getMLBTeamColors = (abbr) => {
-    const teamColors = {
+const getMLBTeamData = (teamName) => {
+    const teamData = {
         // American League East
-        'BAL': ['DF4601', '000000'], // Orange, Black
-        'BOS': ['BD3039', '0C2340'], // Red, Navy
-        'NYY': ['132448', 'C4CED4'], // Navy, Silver
-        'TB': ['092C5C', '8FBCE6'], // Navy, Light Blue
-        'TOR': ['134A8E', 'E8291C'], // Blue, Red
+        'Baltimore Orioles': { colors: ['DF4601', '000000'], logo: '🐦', abbr: 'BAL' },
+        'Boston Red Sox': { colors: ['BD3039', '0C2340'], logo: '🧦', abbr: 'BOS' },
+        'New York Yankees': { colors: ['132448', 'C4CED4'], logo: '🎩', abbr: 'NYY' },
+        'Tampa Bay Rays': { colors: ['092C5C', '8FBCE6'], logo: '☀️', abbr: 'TB' },
+        'Toronto Blue Jays': { colors: ['134A8E', 'E8291C'], logo: '🍁', abbr: 'TOR' },
         
         // American League Central
-        'CWS': ['000000', 'C4CED4'], // Black, Silver
-        'CLE': ['E31937', '0C2340'], // Red, Navy
-        'DET': ['0C2340', 'FA4616'], // Navy, Orange
-        'KC': ['004687', 'BD9B60'], // Blue, Gold
-        'MIN': ['002B5C', 'D31145'], // Navy, Red
+        'Chicago White Sox': { colors: ['000000', 'C4CED4'], logo: '⚫', abbr: 'CWS' },
+        'Cleveland Guardians': { colors: ['E31937', '0C2340'], logo: '🛡️', abbr: 'CLE' },
+        'Detroit Tigers': { colors: ['0C2340', 'FA4616'], logo: '🐅', abbr: 'DET' },
+        'Kansas City Royals': { colors: ['004687', 'BD9B60'], logo: '👑', abbr: 'KC' },
+        'Minnesota Twins': { colors: ['002B5C', 'D31145'], logo: '⭐', abbr: 'MIN' },
         
         // American League West
-        'HOU': ['002D62', 'EB6E1F'], // Navy, Orange
-        'LAA': ['BA0021', '003263'], // Red, Navy
-        'OAK': ['003831', 'EFB21E'], // Green, Gold
-        'SEA': ['0C2C56', '005C5C'], // Navy, Teal
-        'TEX': ['003278', 'C0111F'], // Blue, Red
+        'Houston Astros': { colors: ['002D62', 'EB6E1F'], logo: '🚀', abbr: 'HOU' },
+        'Los Angeles Angels': { colors: ['BA0021', '003263'], logo: '😇', abbr: 'LAA' },
+        'Oakland Athletics': { colors: ['003831', 'EFB21E'], logo: '🅰️', abbr: 'OAK' },
+        'Seattle Mariners': { colors: ['0C2C56', '005C5C'], logo: '🔱', abbr: 'SEA' },
+        'Texas Rangers': { colors: ['003278', 'C0111F'], logo: '🤠', abbr: 'TEX' },
         
         // National League East
-        'ATL': ['CE1141', '13274F'], // Red, Navy
-        'MIA': ['00A3E0', 'EF3340'], // Blue, Red
-        'NYM': ['002D72', 'FF5910'], // Blue, Orange
-        'PHI': ['E81828', '002D72'], // Red, Blue
-        'WSH': ['AB0003', '14225A'], // Red, Navy
+        'Atlanta Braves': { colors: ['CE1141', '13274F'], logo: '🪓', abbr: 'ATL' },
+        'Miami Marlins': { colors: ['00A3E0', 'EF3340'], logo: '🐟', abbr: 'MIA' },
+        'New York Mets': { colors: ['002D72', 'FF5910'], logo: '🏙️', abbr: 'NYM' },
+        'Philadelphia Phillies': { colors: ['E81828', '002D72'], logo: '🔔', abbr: 'PHI' },
+        'Washington Nationals': { colors: ['AB0003', '14225A'], logo: '🦅', abbr: 'WSH' },
         
         // National League Central
-        'CHC': ['0E3386', 'CC3433'], // Blue, Red
-        'CIN': ['C6011F', '000000'], // Red, Black
-        'MIL': ['FFC52F', '12284B'], // Gold, Navy
-        'PIT': ['FDB827', '27251F'], // Gold, Black
-        'STL': ['C41E3A', '0C2340'], // Red, Navy
+        'Chicago Cubs': { colors: ['0E3386', 'CC3433'], logo: '🐻', abbr: 'CHC' },
+        'Cincinnati Reds': { colors: ['C6011F', '000000'], logo: '🔴', abbr: 'CIN' },
+        'Milwaukee Brewers': { colors: ['FFC52F', '12284B'], logo: '🍺', abbr: 'MIL' },
+        'Pittsburgh Pirates': { colors: ['FDB827', '27251F'], logo: '☠️', abbr: 'PIT' },
+        'St. Louis Cardinals': { colors: ['C41E3A', '0C2340'], logo: '🐦', abbr: 'STL' },
         
         // National League West
-        'ARI': ['A71930', 'E3D4AD'], // Red, Tan
-        'COL': ['33006F', 'C4CED4'], // Purple, Silver
-        'LAD': ['005A9C', 'EF3E42'], // Blue, Red
-        'SD': ['2F241D', 'FFC425'], // Brown, Gold
-        'SF': ['FD5A1E', '27251F']  // Orange, Black
+        'Arizona Diamondbacks': { colors: ['A71930', 'E3D4AD'], logo: '🐍', abbr: 'ARI' },
+        'Colorado Rockies': { colors: ['33006F', 'C4CED4'], logo: '⛰️', abbr: 'COL' },
+        'Los Angeles Dodgers': { colors: ['005A9C', 'EF3E42'], logo: '💫', abbr: 'LAD' },
+        'San Diego Padres': { colors: ['2F241D', 'FFC425'], logo: '🏄‍♂️', abbr: 'SD' },
+        'San Francisco Giants': { colors: ['FD5A1E', '27251F'], logo: '🌉', abbr: 'SF' }
     };
     
-    return teamColors[abbr] || ['FF0000', '00FF00']; // RED and GREEN
+    console.log('🔍 Looking for team data for:', teamName);
+    
+    const data = teamData[teamName];
+    if (!data) {
+        console.error('❌ NO TEAM DATA FOUND for:', teamName);
+        console.log('📋 Available teams:', Object.keys(teamData));
+        return { colors: ['FF0000', '00FF00'], logo: '❓', abbr: 'UNK' };
+    }
+    
+    console.log('✅ Found team data for', teamName, ':', data);
+    return data;
 };
 
 /**
@@ -375,62 +385,49 @@ const getMLBTeamColors = (abbr) => {
 const getTodaysMLBGame = async () => {
     console.log('🎯 SINGLE API CALL - STARTING');
     
-    // ✅ CRITICAL FIX: Use local date, not UTC for API query
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     const today = `${year}-${month}-${day}`;
 
-    console.log('📅 Date Info:', {
-        localDate: today,
-        userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        currentTime: now.toLocaleString()
-    });
-    
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
-    
-    console.log('📡 Fetching from:', apiUrl);
     
     try {
         const response = await fetch(apiUrl, {
-            headers: {
-                'Accept': 'application/json',
-            }
+            headers: { 'Accept': 'application/json' }
         });
         
         if (!response.ok) {
-            console.error(`❌ MLB API returned non-OK response: Status ${response.status}, Text: ${response.statusText}`);
             throw new Error(`MLB API returned ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
-        console.log('📥 Raw API response:', data);
         
-        // STRICT VALIDATION - NO MERCY
         if (!data?.dates?.[0]?.games?.length) {
-            console.error(`❌ No MLB games found for ${today} in API response.`);
             throw new Error(`No MLB games found for ${today}`);
         }
         
-        // TAKE FIRST AVAILABLE GAME - PERIOD
         const game = data.dates[0].games[0];
         console.log('🎯 Selected game:', game.teams.home.team.name, 'vs', game.teams.away.team.name);
         
-        // RETURN STANDARDIZED FORMAT
+        // 🎯 FIX: Use team.name instead of team.abbreviation
+        const homeTeamData = getMLBTeamData(game.teams.home.team.name);
+        const awayTeamData = getMLBTeamData(game.teams.away.team.name);
+        
         return {
             id: game.gamePk.toString(),
             homeTeam: {
                 name: game.teams.home.team.name,
-                abbr: game.teams.home.team.abbreviation,
-                logo: '⚾',
-                colors: getMLBTeamColors(game.teams.home.team.abbreviation) 
+                abbr: homeTeamData.abbr, // Use our custom abbreviation
+                logo: homeTeamData.logo, // 🎯 REAL LOGO
+                colors: homeTeamData.colors 
             },
             awayTeam: {
                 name: game.teams.away.team.name,
-                abbr: game.teams.away.team.abbreviation,
-                logo: '⚾',
-                colors: getMLBTeamColors(game.teams.away.team.abbreviation) 
+                abbr: awayTeamData.abbr, // Use our custom abbreviation  
+                logo: awayTeamData.logo, // 🎯 REAL LOGO
+                colors: awayTeamData.colors 
             },
             sport: 'MLB',
             venue: game.venue?.name || 'MLB Stadium',
@@ -439,9 +436,8 @@ const getTodaysMLBGame = async () => {
         };
         
     } catch (error) {
-        // Log the full error object for better debugging
         console.error('❌ MLB API FAILED:', error); 
-        throw error; // DON'T CATCH - LET IT FAIL
+        throw error;
     }
 };
 
