@@ -641,10 +641,10 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
 
                 // Reset todaysPick and update lastPickDate if it's a new day
                 if (storedDate !== currentDate) {
-                    console.log('🔄 Resetting picks for new day');
-                    updatedParsedItem.todaysPick = null;
-                    updatedParsedItem.lastPickDate = currentDate;
-                }
+    console.log('🔄 Resetting picks for new day');
+    updatedParsedItem.todaysPicks = [];
+    updatedParsedItem.lastPickDate = currentDate;
+}
 
                 // Reset weekly stats if it's a new week
                 const currentWeekMonday = getMondayOfCurrentWeek();
@@ -663,6 +663,7 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 if (typeof updatedParsedItem.bettingHistory === 'undefined') updatedParsedItem.bettingHistory = initialValue.bettingHistory;
                 if (typeof updatedParsedItem.achievements === 'undefined') updatedParsedItem.achievements = initialValue.achievements;
                 if (typeof updatedParsedItem.pickHistoryData === 'undefined') updatedParsedItem.pickHistoryData = initialValue.pickHistoryData;
+if (typeof updatedParsedItem.todaysPicks === 'undefined') updatedParsedItem.todaysPicks = initialUserState.todaysPicks;
 
 
                 return updatedParsedItem;
@@ -1000,7 +1001,7 @@ const initialUserState = {
     bestStreak: 0,
     totalPicks: 0,
     correctPicks: 0,
-    todaysPick: null, // { matchupId, selectedTeam, timestamp, date, bet }
+    todaysPicks: [], // CHANGED: Array to hold multiple picks per day
     lastPickDate: null,
     theme: 'dark',
     soundEnabled: true,
@@ -2572,7 +2573,7 @@ const today = getUSEasternDate();
     const todaysMatchup = todaysMatchups[selectedGameIndex];
 
     // Determine if user has picked today (only if todaysMatchup is available)
-    const hasPickedToday = todaysMatchup && userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.date === today;
+    const hasPickedToday = todaysMatchup && userState.todaysPicks?.some(pick => pick.matchupId === todaysMatchup.id && pick.date === today);
 
     // Game timer state
     useEffect(() => {
@@ -2665,13 +2666,13 @@ const today = getUSEasternDate();
 
         setUserState(prev => ({
             ...prev,
-            todaysPick: {
-                matchupId: todaysMatchup.id,
-                selectedTeam: teamChoice,
-                timestamp: new Date().toISOString(),
-                date: today,
-                bet: betAmount // Store the bet amount
-            },
+            todaysPicks: [...prev.todaysPicks.filter(pick => pick.matchupId !== todaysMatchup.id), {
+    matchupId: todaysMatchup.id,
+    selectedTeam: teamChoice,
+    timestamp: new Date().toISOString(),
+    date: today,
+    bet: betAmount
+}],
             lastPickDate: today,
             totalPicks: prev.totalPicks + 1,
             weeklyStats: {
