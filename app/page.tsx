@@ -203,7 +203,7 @@ const useWhop = () => {
  * @property {number} currentStreak - User's current streak.
  * @property {number} bestStreak - User's best streak.
  * @property {number} totalPicks - User's total picks.
- * @property {number} correctPicks - User's correct picks.
+ * @property {number} correctPicks - Total correct picks.
  * @property {number} accuracy - User's accuracy percentage.
  * @property {string} lastActive - ISO string of last active date.
  * @property {number} weeklyWins - This week's correct picks.
@@ -641,10 +641,10 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
 
                 // Reset todaysPick and update lastPickDate if it's a new day
                 if (storedDate !== currentDate) {
-    console.log('🔄 Resetting picks for new day');
-    updatedParsedItem.todaysPicks = [];
-    updatedParsedItem.lastPickDate = currentDate;
-}
+                    console.log('🔄 Resetting picks for new day');
+                    updatedParsedItem.todaysPick = null;
+                    updatedParsedItem.lastPickDate = currentDate;
+                }
 
                 // Reset weekly stats if it's a new week
                 const currentWeekMonday = getMondayOfCurrentWeek();
@@ -663,7 +663,6 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 if (typeof updatedParsedItem.bettingHistory === 'undefined') updatedParsedItem.bettingHistory = initialValue.bettingHistory;
                 if (typeof updatedParsedItem.achievements === 'undefined') updatedParsedItem.achievements = initialValue.achievements;
                 if (typeof updatedParsedItem.pickHistoryData === 'undefined') updatedParsedItem.pickHistoryData = initialValue.pickHistoryData;
-if (typeof updatedParsedItem.todaysPicks === 'undefined') updatedParsedItem.todaysPicks = initialUserState.todaysPicks;
 
 
                 return updatedParsedItem;
@@ -1001,7 +1000,7 @@ const initialUserState = {
     bestStreak: 0,
     totalPicks: 0,
     correctPicks: 0,
-    todaysPicks: [], // CHANGED: Array to hold multiple picks per day
+    todaysPick: null, // { matchupId, selectedTeam, timestamp, date, bet }
     lastPickDate: null,
     theme: 'dark',
     soundEnabled: true,
@@ -1017,7 +1016,7 @@ const initialUserState = {
     totalCoinsSpent: 0,
     lastDailyBonus: null, // ISO string of last bonus collection date
     bettingHistory: [], // Array of { matchupId, pickDate, selectedTeam, betAmount, won, winnings }
-    pickHistoryData: [], // NEW: Detailed history of picks
+    pickHistoryData: [], // Detailed history of all picks made, including results.
     achievements: [] // Array of achievement IDs
 };
 
@@ -2448,13 +2447,14 @@ const App = ({ user }) => {
         sharesByPlatform: {},
         lastShared: null
     }, userId); 
-    // Game results history storage
-    const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
 
-    // Add these new state variables in the App component
-    const [gameResult, setGameResult] = useState(null); // This is for the *current* selected game's result
+    // ✅ ADD: Missing game result state (like in working single-game version)
+    const [gameResult, setGameResult] = useState(null);
     const [resultLoading, setResultLoading] = useState(false);
-    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId); // Cached result for *today's* game
+    
+    // MODIFIED: gameResults to be an object keyed by game ID
+    const [gameResults, setGameResults] = useState({}); // Object keyed by game ID
+    const [cachedGameResults, setCachedGameResults] = useLocalStorage('gameResults', {}, userId);
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -2478,7 +2478,6 @@ const today = getUSEasternDate();
     const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based, which is fine for week start
 
     // FEATURE 3: Multi-Game System - State changes
-    // const [todaysMatchup, setTodaysMatchup] = useState(null); // OLD
     const [todaysMatchups, setTodaysMatchups] = useState([]); // NEW: Array of matchups
     const [selectedGameIndex, setSelectedGameIndex] = useState(0); // NEW: Index of currently viewed game
 
@@ -2573,7 +2572,7 @@ const today = getUSEasternDate();
     const todaysMatchup = todaysMatchups[selectedGameIndex];
 
     // Determine if user has picked today (only if todaysMatchup is available)
-    const hasPickedToday = todaysMatchup && userState.todaysPicks?.some(pick => pick.matchupId === todaysMatchup.id && pick.date === today);
+    const hasPickedToday = todaysMatchup && userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.date === today;
 
     // Game timer state
     useEffect(() => {
@@ -2666,13 +2665,13 @@ const today = getUSEasternDate();
 
         setUserState(prev => ({
             ...prev,
-            todaysPicks: [...prev.todaysPicks.filter(pick => pick.matchupId !== todaysMatchup.id), {
-    matchupId: todaysMatchup.id,
-    selectedTeam: teamChoice,
-    timestamp: new Date().toISOString(),
-    date: today,
-    bet: betAmount
-}],
+            todaysPick: {
+                matchupId: todaysMatchup.id,
+                selectedTeam: teamChoice,
+                timestamp: new Date().toISOString(),
+                date: today,
+                bet: betAmount // Store the bet amount
+            },
             lastPickDate: today,
             totalPicks: prev.totalPicks + 1,
             weeklyStats: {
@@ -2710,26 +2709,30 @@ const today = getUSEasternDate();
 
     }, [teamToConfirm, todaysMatchup, today, betAmount, setUserState, addNotification, playSound]);
 
-    // Add this function inside your App component
-    const fetchAndDisplayResult = useCallback(async () => {
-        // Ensure todaysMatchup is defined for the fetch
-        if (!todaysMatchup || resultLoading) return;
+    // ✅ FIXED: fetchAndDisplayResult with proper state updates
+    const fetchAndDisplayResult = useCallback(async (targetGameId = null) => {
+        // Find the target game from the list of today's matchups
+        const targetGame = targetGameId ? todaysMatchups.find(g => g.id === targetGameId) : todaysMatchup;
+        if (!targetGame || resultLoading) return;
         
         setResultLoading(true);
         try {
-            const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport, todaysMatchup.startTime);
+            const result = await fetchMLBGameResult(targetGame.id, targetGame.sport, targetGame.startTime);
             if (result) {
-                setGameResult(result);
-                // Only cache result for the *currently selected* game if it's today's game
-                if (todaysMatchup.id === userState.todaysPick?.matchupId && new Date(result.completedAt).toISOString().split('T')[0] === today) {
-                    setTodaysGameResult(result); 
+                // ✅ Store result for this specific game
+                setGameResults(prev => ({ ...prev, [targetGame.id]: result }));
+                setCachedGameResults(prev => ({ ...prev, [targetGame.id]: result }));
+                
+                // ✅ Update current game result if this is the selected game
+                if (targetGame.id === todaysMatchup?.id) {
+                    setGameResult(result);
                 }
                 
-                // Update streak, coins, and betting history based on result if user made a pick for THIS game
-                if (userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick.date === today && result.completedAt) {
+                // ✅ Update user state ONLY if this is the game they picked and it's today
+                if (userState.todaysPick?.matchupId === targetGame.id && userState.todaysPick.date === today && result.completedAt) {
                     const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
                     const actualWinner = result.winner; // 'home', 'away', or 'tie'
-                    const bet = userState.todaysPick.bet || 0; // Get the bet amount from the pick
+                    const bet = userState.todaysPick.bet || 0;
                     let isCorrect = userPickedTeam === actualWinner;
 
                     // Treat ties as correct to keep streak going
@@ -2737,35 +2740,35 @@ const today = getUSEasternDate();
                         isCorrect = true;
                     }
 
-                    setIsStreakIncreasing(isCorrect); // Set for animation
+                    setIsStreakIncreasing(isCorrect);
 
                     setUserState(prev => {
+                        // ✅ FIX: Properly calculate streak values
                         const newCurrentStreak = isCorrect ? prev.currentStreak + 1 : 0;
                         const newBestStreak = Math.max(prev.bestStreak, newCurrentStreak);
                         const winnings = isCorrect ? bet * 2 : 0;
-                        const updatedCoins = prev.coins + winnings; // Add winnings if correct
+                        const updatedCoins = prev.coins + winnings;
                         const updatedTotalCoinsEarned = prev.totalCoinsEarned + winnings;
 
                         // Update betting history for this game
                         const updatedBettingHistory = prev.bettingHistory.map(entry =>
-                            entry.matchupId === todaysMatchup.id && entry.pickDate === today
+                            entry.matchupId === targetGame.id && entry.pickDate === today
                                 ? { ...entry, won: isCorrect, winnings: winnings }
                                 : entry
                         );
 
-                        // FEATURE 1: Pick History Page - Update pickHistoryData
+                        // Update pick history data
                         const updatedPickHistoryData = prev.pickHistoryData.map(entry =>
-                            entry.matchupId === todaysMatchup.id && entry.date === today
+                            entry.matchupId === targetGame.id && entry.date === today
                                 ? { ...entry, result: isCorrect ? 'win' : 'loss', winnings: winnings }
                                 : entry
                         );
 
-
                         return {
                             ...prev,
                             correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
-                            currentStreak: newCurrentStreak,
-                            bestStreak: newBestStreak,
+                            currentStreak: newCurrentStreak,  // ✅ Now properly defined
+                            bestStreak: newBestStreak,        // ✅ Now properly defined
                             weeklyStats: {
                                 ...prev.weeklyStats,
                                 correct: prev.weeklyStats.correct + (isCorrect ? 1 : 0)
@@ -2773,13 +2776,13 @@ const today = getUSEasternDate();
                             coins: updatedCoins,
                             totalCoinsEarned: updatedTotalCoinsEarned,
                             bettingHistory: updatedBettingHistory,
-                            pickHistoryData: updatedPickHistoryData // Update pick history
+                            pickHistoryData: updatedPickHistoryData
                         };
                     });
 
                     const resultMessage = isCorrect ?
-                        `🎉 Correct! ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You won ${bet * 2} 🪙!` :
-                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.abbr : todaysMatchup.awayTeam.abbr}, but ${result.winner === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You lost ${bet} 🪙.`;
+                        `🎉 Correct! ${result.winner === 'home' ? targetGame.homeTeam.name : targetGame.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You won ${bet * 2} 🪙!` :
+                        `😞 Wrong! You picked ${userState.todaysPick.selectedTeam === 'home' ? targetGame.homeTeam.abbr : targetGame.awayTeam.abbr}, but ${result.winner === 'home' ? targetGame.homeTeam.name : targetGame.awayTeam.name} won ${result.homeScore}-${result.awayScore}. You lost ${bet} 🪙.`;
 
                     addNotification({
                         type: isCorrect ? 'success' : 'error',
@@ -2792,49 +2795,68 @@ const today = getUSEasternDate();
                 }
             }
         } catch (error) {
-            console.error('Error fetching game result for display:', error);
+            console.error(`Error fetching game result for game ${targetGameId}:`, error);
             addNotification({ type: 'error', message: 'Failed to fetch game result.' });
         } finally {
             setResultLoading(false);
         }
-    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, userState.todaysPick, userState.coins, userState.bettingHistory, userState.pickHistoryData, today, setUserState, addNotification, playSound, triggerHaptic]);
+    }, [todaysMatchups, todaysMatchup, resultLoading, setGameResults, setCachedGameResults, userState.todaysPick, today, setUserState, addNotification, playSound, triggerHaptic]);
 
-    // Auto-fetch results when game should be finished
+    // ✅ FIXED: Auto-fetch results for multiple games
     useEffect(() => {
-        // Only fetch if we have a matchup, game has started, and we don't already have the result
-        // And importantly, only for the CURRENTLY SELECTED GAME
-        if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
-        
-        const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
-        const now = new Date();
-        
-        if (now > estimatedGameEnd) {
-            // Game should be over, fetch result immediately
-            fetchAndDisplayResult();
-        } else {
-            // Set timer to fetch when game should be over, plus a 30min buffer
-            const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
-            if (timeUntilCheck > 0) {
-                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes for game ${todaysMatchup.id}.`);
-                const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
-                return () => clearTimeout(timerId);
-            }
-        }
-    }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
+        // Iterate through all today's matchups
+        todaysMatchups.forEach(game => {
+            const gameId = game.id;
+            const existingResult = gameResults[gameId] || cachedGameResults[gameId];
 
-    // Load cached result on page load for the *selected* game
-    useEffect(() => {
-        // Only if we have a selected matchup and no live result yet for it
-        if (todaysMatchup && !gameResult) {
-            // Check if there's a cached result for THIS specific game ID and today's date
-            if (todaysGameResult && todaysGameResult.gameId === todaysMatchup.id && new Date(todaysGameResult.completedAt).toISOString().split('T')[0] === today) {
-                setGameResult(todaysGameResult);
+            // Only fetch if game has started and we don't have result
+            if (!game || !gameStarted || existingResult) return;
+            
+            const estimatedGameEnd = new Date(new Date(game.startTime).getTime() + (3 * 60 * 60 * 1000));
+            const now = new Date();
+            
+            if (now > estimatedGameEnd) {
+                fetchAndDisplayResult(gameId);
             } else {
-                // If cached result is old, for a different game, or doesn't exist, clear the current gameResult state
-                setGameResult(null);
+                const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
+                if (timeUntilCheck > 0) {
+                    console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes for game ${gameId}.`);
+                    const timerId = setTimeout(() => fetchAndDisplayResult(gameId), timeUntilCheck);
+                    return () => clearTimeout(timerId);
+                }
+            }
+        });
+    }, [gameStarted, todaysMatchups, gameResults, cachedGameResults, fetchAndDisplayResult]);
+
+    // ✅ FIX: Update game result when selected game changes
+    useEffect(() => {
+        if (todaysMatchup) {
+            const gameId = todaysMatchup.id;
+            const existingResult = gameResults[gameId] || cachedGameResults[gameId];
+            setGameResult(existingResult || null);
+        } else {
+            setGameResult(null);
+        }
+    }, [todaysMatchup, gameResults, cachedGameResults]);
+
+    // ✅ FIXED: Load cached results on page load
+    useEffect(() => {
+        if (todaysMatchup) {
+            const gameId = todaysMatchup.id;
+            const cachedResult = cachedGameResults[gameId];
+            
+            if (cachedResult) {
+                const cachedResultDate = new Date(cachedResult.completedAt).toISOString().split('T')[0];
+                if (cachedResultDate === today) {
+                    setGameResults(prev => ({ ...prev, [gameId]: cachedResult }));
+                    setGameResult(cachedResult); // ✅ Also set current game result
+                }
             }
         }
-    }, [todaysGameResult, todaysMatchup, gameResult, today, setGameResult]); // Added todaysMatchup to dependencies
+    }, [todaysMatchup, cachedGameResults, today, setGameResults]);
+
+    // ✅ Use gameResult instead of currentGameResult for display
+    const currentGameResult = gameResult; // This now properly tracks the selected game
 
 
     const handleToggleTheme = useCallback(() => {
@@ -3705,13 +3727,13 @@ const today = getUSEasternDate();
                             )}
                             
                             {/* Show game result if available, otherwise show timer */}
-                            {gameResult ? (
+                            {currentGameResult ? (
                                 <div>
                                     <p className="text-lg font-semibold text-accent-win mb-2">
                                         🏆 Game Finished!
                                     </p>
                                     <GameResultDisplay 
-                                        result={gameResult} 
+                                        result={currentGameResult} 
                                         todaysMatchup={todaysMatchup} 
                                         userPick={userState.todaysPick} 
                                     />
@@ -3745,16 +3767,16 @@ const today = getUSEasternDate();
                                     </div>
                                 )}
 
-                                {/* Add this inside the "hasPickedToday || gameStarted" section */}
-                                {gameStarted && !gameResult && (
-                                    <div className="mt-3">
-                                        <EnhancedButton
-                                            onClick={fetchAndDisplayResult}
-                                            loading={resultLoading}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
-                                        >
-                                            {resultLoading ? 'Checking...' : '🔍 Check Game Result'}
-                                        </EnhancedButton>
+                                {/* Manual check button - ensure it passes the correct game ID */}
+                                {gameStarted && !currentGameResult && (    
+                                    <div className="mt-3">        
+                                        <EnhancedButton            
+                                            onClick={() => fetchAndDisplayResult(todaysMatchup.id)} // ✅ Always pass the game ID            
+                                            loading={resultLoading}            
+                                            className="bg-blue-600 hover:bg-blue-700 text-white text-sm"        
+                                        >            
+                                            {resultLoading ? 'Checking...' : '🔍 Check Game Result'}        
+                                        </EnhancedButton>    
                                     </div>
                                 )}
                             </div>
