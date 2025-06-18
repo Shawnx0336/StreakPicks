@@ -164,6 +164,7 @@ const useWhop = () => {
  * @property {number} totalCoinsSpent - Total coins spent throughout all time.
  * @property {string | null} lastDailyBonus - ISO string of the last date daily bonus was claimed.
  * @property {Array<Object>} bettingHistory - History of bets made.
+ * @property {Array<Object>} pickHistoryData - Detailed history of all picks made, including results.
  * @property {Array<string>} achievements - IDs of unlocked achievements.
  */
 
@@ -379,10 +380,11 @@ const getMLBTeamData = (teamName) => {
 };
 
 /**
- * SINGLE SOURCE OF TRUTH - Gets today's MLB game
- * NO FALLBACKS, NO SIMULATIONS, NO EXCEPTIONS
+ * Modified getTodaysMLBGame to getTodaysMLBGames
+ * Returns an array of up to 2 MLB games (early and late).
+ * If only one or no suitable games, returns an array with 1 game or empty array.
  */
-const getTodaysMLBGame = async () => {
+const getTodaysMLBGames = async () => {
     console.log('🎯 US-TIME-BASED API CALL - STARTING');
     
     // Always use US Eastern Time for determining "game day"
@@ -394,7 +396,7 @@ const getTodaysMLBGame = async () => {
     const day = String(usDate.getDate()).padStart(2, '0');
     const today = `${year}-${month}-${day}`;
 
-    console.log(`🇺🇸 Fetching game for US Eastern date: ${today} (universal for all users)`);
+    console.log(`🇺🇸 Fetching games for US Eastern date: ${today} (universal for all users)`);
 
     const apiUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
     
@@ -410,35 +412,50 @@ const getTodaysMLBGame = async () => {
         const data = await response.json();
         
         if (!data?.dates?.[0]?.games?.length) {
-            throw new Error(`No MLB games found for ${today}`);
+            console.log(`No MLB games found for ${today}`);
+            return []; // Return empty array if no games
         }
         
-        const game = data.dates[0].games[0];
-        console.log('🎯 Selected game:', game.teams.home.team.name, 'vs', game.teams.away.team.name);
+        const allGames = data.dates[0].games;
         
-        // 🎯 FIX: Use team.name instead of team.abbreviation
-        const homeTeamData = getMLBTeamData(game.teams.home.team.name);
-        const awayTeamData = getMLBTeamData(game.teams.away.team.name);
+        // Filter for early and late games
+        const selectedGames = [];
+
+// Just take the first 2 games available for the day
+if (allGames.length >= 2) {
+    selectedGames.push(allGames[0], allGames[allGames.length - 1]);
+} else if (allGames.length === 1) {
+    selectedGames.push(allGames[0]);
+}
+// If no games, selectedGames stays empty
         
-        return {
-            id: game.gamePk.toString(),
-            homeTeam: {
-                name: game.teams.home.team.name,
-                abbr: homeTeamData.abbr, // Use our custom abbreviation
-                logo: homeTeamData.logo, // 🎯 REAL LOGO
-                colors: homeTeamData.colors 
-            },
-            awayTeam: {
-                name: game.teams.away.team.name,
-                abbr: awayTeamData.abbr, // Use our custom abbreviation  
-                logo: awayTeamData.logo, // 🎯 REAL LOGO
-                colors: awayTeamData.colors 
-            },
-            sport: 'MLB',
-            venue: game.venue?.name || 'MLB Stadium',
-            startTime: new Date(game.gameDate).toISOString(),
-            status: 'upcoming'
-        };
+        const formattedGames = selectedGames.map(game => {
+            const homeTeamData = getMLBTeamData(game.teams.home.team.name);
+            const awayTeamData = getMLBTeamData(game.teams.away.team.name);
+            
+            return {
+                id: game.gamePk.toString(),
+                homeTeam: {
+                    name: game.teams.home.team.name,
+                    abbr: homeTeamData.abbr,
+                    logo: homeTeamData.logo,
+                    colors: homeTeamData.colors 
+                },
+                awayTeam: {
+                    name: game.teams.away.team.name,
+                    abbr: awayTeamData.abbr,  
+                    logo: awayTeamData.logo, 
+                    colors: awayTeamData.colors 
+                },
+                sport: 'MLB',
+                venue: game.venue?.name || 'MLB Stadium',
+                startTime: new Date(game.gameDate).toISOString(),
+                status: 'upcoming'
+            };
+        });
+
+        console.log('🎯 Selected games:', formattedGames.map(g => `${g.homeTeam.abbr} vs ${g.awayTeam.abbr}`).join(', '));
+        return formattedGames;
         
     } catch (error) {
         console.error('❌ MLB API FAILED:', error); 
@@ -645,6 +662,7 @@ const useLocalStorage = (keyPrefix, initialValue, userId) => {
                 if (typeof updatedParsedItem.lastDailyBonus === 'undefined') updatedParsedItem.lastDailyBonus = initialValue.lastDailyBonus;
                 if (typeof updatedParsedItem.bettingHistory === 'undefined') updatedParsedItem.bettingHistory = initialValue.bettingHistory;
                 if (typeof updatedParsedItem.achievements === 'undefined') updatedParsedItem.achievements = initialValue.achievements;
+                if (typeof updatedParsedItem.pickHistoryData === 'undefined') updatedParsedItem.pickHistoryData = initialValue.pickHistoryData;
 
 
                 return updatedParsedItem;
@@ -891,7 +909,13 @@ const useFirebaseLeaderboard = (userState, userId) => {
         id: simpleHash(userId).toString(),
         whopUserId: userId, // This will be validated by Firebase rules
         displayName: userState.displayName,
-        // ... rest of your data
+        currentStreak: userState.currentStreak, // Ensure these are included for update
+        bestStreak: userState.bestStreak,
+        totalPicks: userState.totalPicks,
+        correctPicks: userState.correctPicks,
+        accuracy: userState.totalPicks > 0 ? Math.round((userState.correctPicks / userState.totalPicks) * 100) : 0,
+        weeklyWins: userState.weeklyStats.correct, // Assuming this is part of weekly stats
+        lastActive: new Date().toISOString(),
     };
 
     try {
@@ -992,6 +1016,7 @@ const initialUserState = {
     totalCoinsSpent: 0,
     lastDailyBonus: null, // ISO string of last bonus collection date
     bettingHistory: [], // Array of { matchupId, pickDate, selectedTeam, betAmount, won, winnings }
+    pickHistoryData: [], // NEW: Detailed history of picks
     achievements: [] // Array of achievement IDs
 };
 
@@ -2188,6 +2213,224 @@ const StatsCard = ({ title, value, change, color }) => (
     </div>
 );
 
+/**
+ * NEW: PickHistoryModal component
+ */
+const PickHistoryModal = ({ isOpen, onClose, pickHistory, todaysMatchups }) => {
+    if (!isOpen) return null;
+
+    const [filter, setFilter] = useState('all'); // 'all', 'wins', 'losses', 'this_week'
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const filteredHistory = useMemo(() => {
+        let history = [...pickHistory].reverse(); // Show most recent first
+
+        if (searchTerm) {
+            history = history.filter(pick =>
+                pick.homeTeam.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                pick.awayTeam.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                pick.selectedTeam.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
+
+        if (filter === 'wins') {
+            history = history.filter(pick => pick.result === 'win');
+        } else if (filter === 'losses') {
+            history = history.filter(pick => pick.result === 'loss');
+        } else if (filter === 'this_week') {
+            const currentWeekMonday = new Date(getMondayOfCurrentWeek());
+            history = history.filter(pick => {
+                const pickDate = new Date(pick.date);
+                return pickDate >= currentWeekMonday;
+            });
+        }
+        return history;
+    }, [pickHistory, filter, searchTerm]);
+
+    const getTeamName = (matchupId, teamType) => {
+        // This is a simplification; ideally, pickHistory should store full team names for consistency.
+        // For now, we'll try to find it in today's matchups or use what's stored.
+        const pickEntry = pickHistory.find(p => p.matchupId === matchupId);
+        if (pickEntry) {
+            return teamType === 'home' ? pickEntry.homeTeam.name : pickEntry.awayTeam.name;
+        }
+        return `Team ${teamType}`; // Fallback
+    }
+
+    return (
+        <div className="leaderboard-modal animate-fadeInUp"> {/* Reusing leaderboard-modal styling */}
+            <div className="leaderboard-content bg-bg-secondary text-text-primary">
+                {/* Header */}
+                <div className="p-4 border-b-2 border-bg-tertiary flex justify-between items-center">
+                    <h3 className="text-2xl font-bold">📊 Pick History</h3>
+                    <button
+                        onClick={onClose}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        aria-label="Close pick history modal"
+                    >
+                        &times;
+                    </button>
+                </div>
+
+                {/* Filters */}
+                <div className="leaderboard-tabs text-text-secondary font-semibold">
+                    <button
+                        className={`leaderboard-tab ${filter === 'all' ? 'active bg-accent-info text-white rounded-tl-xl' : 'hover:bg-bg-tertiary'}`}
+                        onClick={() => setFilter('all')}
+                    >
+                        All
+                    </button>
+                    <button
+                        className={`leaderboard-tab ${filter === 'wins' ? 'active bg-accent-info text-white' : 'hover:bg-bg-tertiary'}`}
+                        onClick={() => setFilter('wins')}
+                    >
+                        Wins
+                    </button>
+                    <button
+                        className={`leaderboard-tab ${filter === 'losses' ? 'active bg-accent-info text-white' : 'hover:bg-bg-tertiary'}`}
+                        onClick={() => setFilter('losses')}
+                    >
+                        Losses
+                    </button>
+                    <button
+                        className={`leaderboard-tab ${filter === 'this_week' ? 'active bg-accent-info text-white rounded-tr-xl' : 'hover:bg-bg-tertiary'}`}
+                        onClick={() => setFilter('this_week')}
+                    >
+                        This Week
+                    </button>
+                </div>
+
+                {/* Search */}
+                <div className="p-4 border-b-2 border-bg-tertiary">
+                    <input
+                        type="text"
+                        placeholder="Search teams..."
+                        className="w-full p-2 rounded-lg bg-bg-tertiary text-text-primary placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-accent-info"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+
+                {/* History Table */}
+                <div className="p-4">
+                    {filteredHistory.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm text-text-primary">
+                                <thead className="border-b-2 border-bg-tertiary">
+                                    <tr>
+                                        <th className="py-2 px-2 text-left">Date</th>
+                                        <th className="py-2 px-2 text-left">Matchup</th>
+                                        <th className="py-2 px-2 text-left">Pick</th>
+                                        <th className="py-2 px-2 text-right">Bet</th>
+                                        <th className="py-2 px-2 text-center">Result</th>
+                                        <th className="py-2 px-2 text-right">Winnings</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredHistory.map((pick) => (
+                                        <tr key={pick.id} className="border-b border-bg-tertiary last:border-b-0">
+                                            <td className="py-2 px-2 text-xs">{new Date(pick.date).toLocaleDateString()}</td>
+                                            <td className="py-2 px-2">
+                                                {pick.homeTeam.abbr} vs {pick.awayTeam.abbr}
+                                            </td>
+                                            <td className="py-2 px-2 font-semibold">
+                                                {pick.selectedTeam === 'home' ? pick.homeTeam.abbr : pick.awayTeam.abbr}
+                                            </td>
+                                            <td className="py-2 px-2 text-right">{pick.betAmount} 🪙</td>
+                                            <td className="py-2 px-2 text-center">
+                                                {pick.result === 'win' && <span className="text-green-500">✅ Win</span>}
+                                                {pick.result === 'loss' && <span className="text-red-500">❌ Loss</span>}
+                                                {pick.result === null && <span className="text-gray-500">⏳ Pending</span>}
+                                            </td>
+                                            <td className="py-2 px-2 text-right">
+                                                {pick.winnings} 🪙
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-center text-text-secondary p-4">No picks in history yet.</p>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * NEW: TutorialModal component
+ */
+const TutorialModal = ({ isOpen, step, onNext, onClose, totalSteps }) => {
+    if (!isOpen) return null;
+
+    const steps = [
+        { title: "Welcome!", content: "Pick the winning team daily to build your streak!" },
+        { title: "Choose Your Team", content: "Tap a team card to make your pick" },
+        { title: "Place Your Bet", content: "Select how many coins to bet (10-100)" },
+        { title: "Earn Coins", content: "Win 2x your bet amount if you're correct!" },
+        { title: "Build Streaks", content: "Consecutive wins build your streak ranking" },
+        { title: "Ready to Play!", content: "Make your first pick and start winning!" }
+    ];
+
+    const currentStepContent = steps[step];
+
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] backdrop-blur-sm p-4">
+            <div className="bg-bg-secondary rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border-2 border-bg-tertiary animate-fadeInUp">
+                <div className="text-center">
+                    <h3 className="text-2xl font-bold mb-3 text-text-primary">{currentStepContent.title}</h3>
+                    <p className="text-md text-text-secondary mb-6">{currentStepContent.content}</p>
+
+                    <div className="text-text-secondary mb-4">
+                        Step {step + 1} of {totalSteps}
+                    </div>
+
+                    <div className="flex gap-3">
+                        {step < totalSteps - 1 ? (
+                            <button onClick={onNext} className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md">
+                                Next
+                            </button>
+                        ) : (
+                            <button onClick={onClose} className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md">
+                                Let's Play!
+                            </button>
+                        )}
+                        <button onClick={onClose} className="py-3 px-4 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 shadow-md">
+                            {step < totalSteps - 1 ? 'Skip' : 'Close'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * NEW: GameSelector Component
+ */
+const GameSelector = ({ games, selectedIndex, onSelect }) => (
+    <div className="flex justify-center gap-2 mb-4 overflow-x-auto py-2 px-2 scrollbar-hide">
+        {games.map((game, index) => (
+            <button        
+                key={game.id}        
+                onClick={() => onSelect(index)}        
+                className={`flex-shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 transform hover:scale-105 shadow-md
+                    ${selectedIndex === index             
+                        ? 'bg-blue-600 text-white border-2 border-blue-700'             
+                        : 'bg-bg-tertiary text-text-primary border-2 border-bg-tertiary hover:bg-bg-quaternary'        
+                    }`}      
+            >        
+                Game {index + 1} - {new Date(game.startTime).toLocaleTimeString('en-US', {           
+                    hour: 'numeric',           
+                    minute: '2-digit'         
+                })}      
+            </button>    
+        ))}  
+    </div>
+);
+
 
 // ========== APP COMPONENT WITH FIXES ==========
 /**
@@ -2208,9 +2451,9 @@ const App = ({ user }) => {
     const [gameResults, setGameResults] = useLocalStorage('gameResults', [], userId); 
 
     // Add these new state variables in the App component
-    const [gameResult, setGameResult] = useState(null);
+    const [gameResult, setGameResult] = useState(null); // This is for the *current* selected game's result
     const [resultLoading, setResultLoading] = useState(false);
-    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId);
+    const [todaysGameResult, setTodaysGameResult] = useLocalStorage('todaysGameResult', null, userId); // Cached result for *today's* game
 
     // Leaderboard data - NOW USING REAL Firebase LEADERBOARD HOOK
     const { leaderboardData, updateLeaderboard, refreshLeaderboard } = useFirebaseLeaderboard(userState, userId);
@@ -2233,8 +2476,11 @@ const App = ({ user }) => {
 const today = getUSEasternDate();
     const currentWeekMonday = getMondayOfCurrentWeek(); // This remains UTC based, which is fine for week start
 
+    // FEATURE 3: Multi-Game System - State changes
+    // const [todaysMatchup, setTodaysMatchup] = useState(null); // OLD
+    const [todaysMatchups, setTodaysMatchups] = useState([]); // NEW: Array of matchups
+    const [selectedGameIndex, setSelectedGameIndex] = useState(0); // NEW: Index of currently viewed game
 
-    const [todaysMatchup, setTodaysMatchup] = useState(null);
     const [matchupLoading, setMatchupLoading] = useState(true);
     const [isInitialized, setIsInitialized] = useState(false); // NEW: To signal initial data load complete
     const [showShareModal, setShowShareModal] = useState(false); // State for share modal visibility
@@ -2255,6 +2501,14 @@ const today = getUSEasternDate();
     // Achievement Modal states
     const [showAchievementModal, setShowAchievementModal] = useState(false);
     const [unlockedAchievement, setUnlockedAchievement] = useState(null);
+
+    // FEATURE 1: Pick History Page - State
+    const [showPickHistory, setShowPickHistory] = useState(false);
+
+    // FEATURE 2: Onboarding Tutorial - State
+    const [showTutorial, setShowTutorial] = useState(false);
+    const [tutorialStep, setTutorialStep] = useState(0);
+    const TUTORIAL_TOTAL_STEPS = 6;
 
 
     // Initialize userState displayName and weeklyStats on first load or user change
@@ -2287,79 +2541,89 @@ const today = getUSEasternDate();
             if (typeof updatedState.lastDailyBonus === 'undefined') { updatedState.lastDailyBonus = initialUserState.lastDailyBonus; needsUpdate = true; }
             if (typeof updatedState.bettingHistory === 'undefined') { updatedState.bettingHistory = initialUserState.bettingHistory; needsUpdate = true; }
             if (typeof updatedState.achievements === 'undefined') { updatedState.achievements = initialUserState.achievements; needsUpdate = true; }
-
+            if (typeof updatedState.pickHistoryData === 'undefined') { updatedState.pickHistoryData = initialUserState.pickHistoryData; needsUpdate = true; } // NEW: For pick history
 
             return needsUpdate ? updatedState : prev;
         });
     }, [user, currentWeekMonday, setUserState]);
 
-    // Load today's matchup - SINGLE PATH ONLY
+    // FEATURE 3: Multi-Game System - Load today's matchups
     useEffect(() => {
-    const loadTodaysGame = async () => {
-        setMatchupLoading(true);
-        try {
-            const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-            const game = await getTodaysMLBGame(userTimezone);
-            setTodaysMatchup(game);
-        } catch (error) {
-            console.error('Game loading failed:', error);
-            setTodaysMatchup(null);
-        }
-        setMatchupLoading(false);
-    };
-    loadTodaysGame();
-}, []);
+        const loadTodaysGames = async () => {
+            setMatchupLoading(true);
+            try {
+                // Changed from getTodaysMLBGame to getTodaysMLBGames
+                const games = await getTodaysMLBGames(); 
+                setTodaysMatchups(games); // Changed from setTodaysMatchup
+                // Reset selected game index if no games or index out of bounds
+                if (games.length === 0 || selectedGameIndex >= games.length) {
+                    setSelectedGameIndex(0);
+                }
+            } catch (error) {
+                console.error('Games loading failed:', error);
+                setTodaysMatchups([]); // Changed from setTodaysMatchup(null)
+            }
+            setMatchupLoading(false);
+        };
+        loadTodaysGames();
+    }, []); // Removed userTimezone from dependencies as it's handled internally by getTodaysMLBGames
 
+    // Derive the currently selected matchup
+    const todaysMatchup = todaysMatchups[selectedGameIndex];
 
     // Determine if user has picked today (only if todaysMatchup is available)
     const hasPickedToday = todaysMatchup && userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.date === today;
 
     // Game timer state
     useEffect(() => {
-        if (!todaysMatchup?.startTime) {
-            setTimeLeft('No game time');
+    if (!todaysMatchup?.startTime) {
+        setTimeLeft('No game time');
+        setGameStarted(false); // ✅ Reset when no game
+        return;
+    }
+    
+    // FORCE consistent parsing
+    let gameTime;
+    try {
+        gameTime = new Date(todaysMatchup.startTime);
+        if (isNaN(gameTime.getTime())) {
+            throw new Error('Invalid date');
+        }
+    } catch (error) {
+        console.error('Timer: Date parsing failed:', error);
+        setTimeLeft('Invalid game time');
+        setGameStarted(false); // ✅ Reset on error
+        return;
+    }
+    
+    const updateTimer = () => {
+        const now = new Date();
+        const diff = gameTime - now;
+        
+        if (diff <= 0) {
+            setGameStarted(true);
+            setTimeLeft('Game Started');
             return;
+        } else {
+            setGameStarted(false); // ✅ Reset if game hasn't started yet
         }
         
-        // FORCE consistent parsing
-        let gameTime;
-        try {
-            gameTime = new Date(todaysMatchup.startTime);
-            if (isNaN(gameTime.getTime())) {
-                throw new Error('Invalid date');
-            }
-        } catch (error) {
-            console.error('Timer: Date parsing failed:', error);
-            setTimeLeft('Invalid game time');
-            return;
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        
+        if (hours > 0) {
+            setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+        } else {
+            setTimeLeft(`${minutes}m ${seconds}s`);
         }
-        
-        const updateTimer = () => {
-            const now = new Date();
-            const diff = gameTime - now;
-            
-            if (diff <= 0) {
-                setGameStarted(true);
-                setTimeLeft('Game Started');
-                return;
-            }
-            
-            const hours = Math.floor(diff / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-            
-            if (hours > 0) {
-                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
-            } else {
-                setTimeLeft(`${minutes}m ${seconds}s`);
-            }
-        };
-        
-        updateTimer(); // Initial call
-        const interval = setInterval(updateTimer, 1000);
-        
-        return () => clearInterval(interval);
-    }, [todaysMatchup?.startTime]);
+    };
+    
+    updateTimer(); // Initial call
+    const interval = setInterval(updateTimer, 1000);
+    
+    return () => clearInterval(interval);
+}, [todaysMatchup?.startTime]);
 
 
     /**
@@ -2391,10 +2655,11 @@ const today = getUSEasternDate();
 
     /**
      * Confirms and processes the pick after modal confirmation.
+     * Modified to save detailed pick history.
      */
     const confirmPick = useCallback(() => {
         setShowPickConfirmationModal(false);
-        if (!teamToConfirm) return;
+        if (!teamToConfirm || !todaysMatchup) return; // Ensure matchup is available
 
         const teamChoice = teamToConfirm.abbr === todaysMatchup.homeTeam.abbr ? 'home' : 'away';
 
@@ -2421,6 +2686,18 @@ const today = getUSEasternDate();
                 selectedTeam: teamChoice,
                 betAmount: betAmount,
                 won: null // Will be updated after result
+            }],
+            // FEATURE 1: Pick History Page - Add detailed history
+            pickHistoryData: [...prev.pickHistoryData, {
+                id: Date.now(), // Unique ID for this pick entry
+                date: today,
+                matchupId: todaysMatchup.id,
+                homeTeam: { name: todaysMatchup.homeTeam.name, abbr: todaysMatchup.homeTeam.abbr },
+                awayTeam: { name: todaysMatchup.awayTeam.name, abbr: todaysMatchup.awayTeam.abbr },
+                selectedTeam: teamChoice, // 'home' or 'away'
+                betAmount: betAmount,
+                result: null, // Will be updated later: 'win', 'loss', 'tie'
+                winnings: 0 // Will be updated later
             }]
         }));
 
@@ -2434,6 +2711,7 @@ const today = getUSEasternDate();
 
     // Add this function inside your App component
     const fetchAndDisplayResult = useCallback(async () => {
+        // Ensure todaysMatchup is defined for the fetch
         if (!todaysMatchup || resultLoading) return;
         
         setResultLoading(true);
@@ -2441,10 +2719,13 @@ const today = getUSEasternDate();
             const result = await fetchMLBGameResult(todaysMatchup.id, todaysMatchup.sport, todaysMatchup.startTime);
             if (result) {
                 setGameResult(result);
-                setTodaysGameResult(result); // Cache it
+                // Only cache result for the *currently selected* game if it's today's game
+                if (todaysMatchup.id === userState.todaysPick?.matchupId && new Date(result.completedAt).toISOString().split('T')[0] === today) {
+                    setTodaysGameResult(result); 
+                }
                 
-                // Update streak, coins, and betting history based on result if user made a pick
-                if (hasPickedToday && userState.todaysPick && result.completedAt) {
+                // Update streak, coins, and betting history based on result if user made a pick for THIS game
+                if (userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick.date === today && result.completedAt) {
                     const userPickedTeam = userState.todaysPick.selectedTeam; // 'home' or 'away'
                     const actualWinner = result.winner; // 'home', 'away', or 'tie'
                     const bet = userState.todaysPick.bet || 0; // Get the bet amount from the pick
@@ -2471,6 +2752,14 @@ const today = getUSEasternDate();
                                 : entry
                         );
 
+                        // FEATURE 1: Pick History Page - Update pickHistoryData
+                        const updatedPickHistoryData = prev.pickHistoryData.map(entry =>
+                            entry.matchupId === todaysMatchup.id && entry.date === today
+                                ? { ...entry, result: isCorrect ? 'win' : 'loss', winnings: winnings }
+                                : entry
+                        );
+
+
                         return {
                             ...prev,
                             correctPicks: prev.correctPicks + (isCorrect ? 1 : 0),
@@ -2482,7 +2771,8 @@ const today = getUSEasternDate();
                             },
                             coins: updatedCoins,
                             totalCoinsEarned: updatedTotalCoinsEarned,
-                            bettingHistory: updatedBettingHistory
+                            bettingHistory: updatedBettingHistory,
+                            pickHistoryData: updatedPickHistoryData // Update pick history
                         };
                     });
 
@@ -2506,13 +2796,12 @@ const today = getUSEasternDate();
         } finally {
             setResultLoading(false);
         }
-    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, hasPickedToday, userState.todaysPick, userState.coins, userState.bettingHistory, today, setUserState, addNotification, playSound, triggerHaptic]);
-
-    // Add these useEffect hooks in your App component
+    }, [todaysMatchup, resultLoading, setGameResult, setTodaysGameResult, userState.todaysPick, userState.coins, userState.bettingHistory, userState.pickHistoryData, today, setUserState, addNotification, playSound, triggerHaptic]);
 
     // Auto-fetch results when game should be finished
     useEffect(() => {
         // Only fetch if we have a matchup, game has started, and we don't already have the result
+        // And importantly, only for the CURRENTLY SELECTED GAME
         if (!todaysMatchup || !gameStarted || gameResult || todaysGameResult) return;
         
         const estimatedGameEnd = new Date(new Date(todaysMatchup.startTime).getTime() + (3 * 60 * 60 * 1000)); // 3 hours
@@ -2525,26 +2814,26 @@ const today = getUSEasternDate();
             // Set timer to fetch when game should be over, plus a 30min buffer
             const timeUntilCheck = estimatedGameEnd.getTime() - now.getTime() + (30 * 60 * 1000);
             if (timeUntilCheck > 0) {
-                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes.`);
+                console.log(`Scheduling result check in ${Math.round(timeUntilCheck / 1000 / 60)} minutes for game ${todaysMatchup.id}.`);
                 const timerId = setTimeout(fetchAndDisplayResult, timeUntilCheck);
                 return () => clearTimeout(timerId);
             }
         }
     }, [gameStarted, todaysMatchup, gameResult, todaysGameResult, fetchAndDisplayResult]);
 
-    // Load cached result on page load
+    // Load cached result on page load for the *selected* game
     useEffect(() => {
-        if (todaysGameResult && !gameResult) {
-            // Ensure the cached result is for today's game
-            const cachedResultDate = new Date(todaysGameResult.completedAt).toISOString().split('T')[0];
-            if (cachedResultDate === today && todaysMatchup && todaysGameResult.gameId === todaysMatchup.id) {
+        // Only if we have a selected matchup and no live result yet for it
+        if (todaysMatchup && !gameResult) {
+            // Check if there's a cached result for THIS specific game ID and today's date
+            if (todaysGameResult && todaysGameResult.gameId === todaysMatchup.id && new Date(todaysGameResult.completedAt).toISOString().split('T')[0] === today) {
                 setGameResult(todaysGameResult);
             } else {
-                // If cached result is old or for a different game, clear it
-                setTodaysGameResult(null);
+                // If cached result is old, for a different game, or doesn't exist, clear the current gameResult state
+                setGameResult(null);
             }
         }
-    }, [todaysGameResult, gameResult, today, todaysMatchup, setTodaysGameResult]);
+    }, [todaysGameResult, todaysMatchup, gameResult, today, setGameResult]); // Added todaysMatchup to dependencies
 
 
     const handleToggleTheme = useCallback(() => {
@@ -2695,6 +2984,38 @@ const today = getUSEasternDate();
         () => handlePickInitiate('home')  // Swipe right for home team
     );
 
+    // FEATURE 2: Onboarding Tutorial - useEffect to show for new users
+    const [hasSeenTutorial, setHasSeenTutorial] = useLocalStorage('hasSeenTutorial', false, userId);
+
+    useEffect(() => {
+      // Only show tutorial if:
+      // 1. User hasn't seen it before
+      // 2. Matchup is loaded
+      // 3. There's a matchup available
+      // 4. User has made 0 total picks
+      if (!hasSeenTutorial && !matchupLoading && todaysMatchups.length > 0 && userState.totalPicks === 0) {
+        setShowTutorial(true);
+      }
+    }, [hasSeenTutorial, matchupLoading, todaysMatchups, userState.totalPicks]);
+
+    const handleNextTutorialStep = useCallback(() => {
+        if (tutorialStep < TUTORIAL_TOTAL_STEPS - 1) {
+            setTutorialStep(prev => prev + 1);
+        } else {
+            setHasSeenTutorial(true); // Mark as seen when tutorial finishes
+            setShowTutorial(false);
+            setTutorialStep(0); // Reset for next time (though won't show again)
+        }
+        triggerHaptic('light');
+    }, [tutorialStep, setHasSeenTutorial, triggerHaptic]);
+
+    const handleSkipTutorial = useCallback(() => {
+        setHasSeenTutorial(true); // Mark as seen
+        setShowTutorial(false);
+        setTutorialStep(0); // Reset step
+        triggerHaptic('light');
+    }, [setHasSeenTutorial, triggerHaptic]);
+
 
     // Simple loading check - no complex logic
     if (matchupLoading) {
@@ -2738,7 +3059,7 @@ const today = getUSEasternDate();
     }
 
     // CLEAN ERROR STATE - NO FALLBACKS
-    if (!matchupLoading && !todaysMatchup) {
+    if (!matchupLoading && todaysMatchups.length === 0) { // Changed condition
         return (
             <div className="min-h-screen bg-bg-primary text-text-primary flex items-center justify-center">
                 <style>
@@ -3293,7 +3614,13 @@ const today = getUSEasternDate();
                         font-size: 1rem;
                     }
                 }
-
+                .scrollbar-hide::-webkit-scrollbar {
+                    display: none;
+                }
+                .scrollbar-hide {
+                    -ms-overflow-style: none;  /* IE and Edge */
+                    scrollbar-width: none;  /* Firefox */
+                }
                 `}
             </style>
             <script src="https://cdn.tailwindcss.com"></script>
@@ -3307,121 +3634,133 @@ const today = getUSEasternDate();
                     onOpenLeaderboard={() => setShowLeaderboard(true)}
                 />
 
+                {/* FEATURE 3: Multi-Game System - Game Selector */}
+                {todaysMatchups.length > 1 && (  
+                    <GameSelector     
+                        games={todaysMatchups}    
+                        selectedIndex={selectedGameIndex}    
+                        onSelect={setSelectedGameIndex}  
+                    />
+                )}
+
                 {/* Today's Matchup Card */}
-                <div className="matchup-card mb-6"
-                    onTouchStart={onTouchStart}
-                    onTouchMove={onTouchMove}
-                    onTouchEnd={onTouchEnd}
-                > {/* Applied matchup-card styling */}
-                    <div className="flex justify-between items-center mb-4 px-6 pt-6"> {/* Added padding to align with matchup-card */}
-                        <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
-                            {todaysMatchup.sport}
-                        </span>
-                        {/* Data source will always be live now */}
-                        <span className="text-xs text-text-secondary">
-                            📡 Live
-                        </span>
-                        <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
-                    </div>
+                {todaysMatchup && ( // Only render if a matchup is selected
+                    <div className="matchup-card mb-6"
+                        onTouchStart={onTouchStart}
+                        onTouchMove={onTouchMove}
+                        onTouchEnd={onTouchEnd}
+                    > {/* Applied matchup-card styling */}
+                        <div className="flex justify-between items-center mb-4 px-6 pt-6"> {/* Added padding to align with matchup-card */}
+                            <span className="bg-accent-info text-xs px-3 py-1 rounded-full font-semibold text-white">
+                                {todaysMatchup.sport}
+                            </span>
+                            {/* Data source will always be live now */}
+                            <span className="text-xs text-text-secondary">
+                                📡 Live
+                            </span>
+                            <span className="text-text-secondary text-xs">{todaysMatchup.venue}</span>
+                        </div>
 
-                    {/* Team vs Team using the new team-selection-container grid */}
-                    <div className="team-selection-container">
-                        <EnhancedTeamCard
-                            team={todaysMatchup.homeTeam}
-                            isSelected={userState.todaysPick?.selectedTeam === 'home'}
-                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
-                            onClick={() => handlePickInitiate('home')}
-                            disabled={hasPickedToday || gameStarted}
-                        />
-
-                        <div className="vs-divider">VS</div>
-
-                        <EnhancedTeamCard
-                            team={todaysMatchup.awayTeam}
-                            isSelected={userState.todaysPick?.selectedTeam === 'away'}
-                            isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
-                            onClick={() => handlePickInitiate('away')}
-                            disabled={hasPickedToday || gameStarted}
-                        />
-                    </div>
-
-                    {/* Betting Interface */}
-                    {!hasPickedToday && !gameStarted && (
-                        <BettingInterface 
-                            onBetChange={setBetAmount} 
-                            userCoins={userState.coins} 
-                            currentBet={betAmount} 
-                        />
-                    )}
-
-                    {/* Enhanced Game Time Display */}
-                    <div className="text-center mb-6 px-6">
-                        {todaysMatchup?.startTime ? (
-                            <EnhancedGameTimeDisplay 
-                                startTime={todaysMatchup.startTime} 
-                                setTimeLeft={setTimeLeft}
-                                matchupId={todaysMatchup.id}
+                        {/* Team vs Team using the new team-selection-container grid */}
+                        <div className="team-selection-container">
+                            <EnhancedTeamCard
+                                team={todaysMatchup.homeTeam}
+                                isSelected={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
+                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'home'}
+                                onClick={() => handlePickInitiate('home')}
+                                disabled={hasPickedToday || gameStarted}
                             />
-                        ) : (
-                            <div className="text-red-500">⚠️ No game time available</div>
-                        )}
-                        
-                        {/* Show game result if available, otherwise show timer */}
-                        {gameResult ? (
-                            <div>
-                                <p className="text-lg font-semibold text-accent-win mb-2">
-                                    🏆 Game Finished!
-                                </p>
-                                <GameResultDisplay 
-                                    result={gameResult} 
-                                    todaysMatchup={todaysMatchup} 
-                                    userPick={userState.todaysPick} 
-                                />
-                            </div>
-                        ) : (
-                            <p className="text-lg font-semibold text-text-primary">
-                                ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
-                            </p>
-                        )}
-                    </div>
-                    
-                    {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
-                    {(hasPickedToday || gameStarted) && (
-                        <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
-                            <p className="font-semibold text-text-primary">
-                                {hasPickedToday ?
-                                    `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
-                                    '🔒 Game has started!'
-                                }
-                            </p>
-                            <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>
-                            {/* Share Pick Button (Option B) */}
-                            {hasPickedToday && userState.currentStreak > 0 && (
-                                <div className="mt-4 text-center">
-                                    <EnhancedButton
-                                        onClick={() => setShowShareModal(true)}
-                                        className="bg-green-600 hover:bg-green-700 text-white"
-                                    >
-                                        📱 Share This Pick
-                                    </EnhancedButton>
-                                </div>
-                            )}
 
-                            {/* Add this inside the "hasPickedToday || gameStarted" section */}
-                            {gameStarted && !gameResult && (
-                                <div className="mt-3">
-                                    <EnhancedButton
-                                        onClick={fetchAndDisplayResult}
-                                        loading={resultLoading}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
-                                    >
-                                        {resultLoading ? 'Checking...' : '🔍 Check Game Result'}
-                                    </EnhancedButton>
+                            <div className="vs-divider">VS</div>
+
+                            <EnhancedTeamCard
+                                team={todaysMatchup.awayTeam}
+                                isSelected={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
+                                isPicked={userState.todaysPick?.matchupId === todaysMatchup.id && userState.todaysPick?.selectedTeam === 'away'}
+                                onClick={() => handlePickInitiate('away')}
+                                disabled={hasPickedToday || gameStarted}
+                            />
+                        </div>
+
+                        {/* Betting Interface */}
+                        {!hasPickedToday && !gameStarted && (
+                            <BettingInterface 
+                                onBetChange={setBetAmount} 
+                                userCoins={userState.coins} 
+                                currentBet={betAmount} 
+                            />
+                        )}
+
+                        {/* Enhanced Game Time Display */}
+                        <div className="text-center mb-6 px-6">
+                            {todaysMatchup?.startTime ? (
+                                <EnhancedGameTimeDisplay 
+                                    startTime={todaysMatchup.startTime} 
+                                    setTimeLeft={setTimeLeft}
+                                    matchupId={todaysMatchup.id}
+                                />
+                            ) : (
+                                <div className="text-red-500">⚠️ No game time available</div>
+                            )}
+                            
+                            {/* Show game result if available, otherwise show timer */}
+                            {gameResult ? (
+                                <div>
+                                    <p className="text-lg font-semibold text-accent-win mb-2">
+                                        🏆 Game Finished!
+                                    </p>
+                                    <GameResultDisplay 
+                                        result={gameResult} 
+                                        todaysMatchup={todaysMatchup} 
+                                        userPick={userState.todaysPick} 
+                                    />
                                 </div>
+                            ) : (
+                                <p className="text-lg font-semibold text-text-primary">
+                                    ⏰ Starts in: <span className="font-mono">{timeLeft || 'Calculating...'}</span>
+                                </p>
                             )}
                         </div>
-                    )}
-                </div>
+                        
+                        {/* Pick Buttons or Result (now handled by EnhancedTeamCard's disabled state) */}
+                        {(hasPickedToday || gameStarted) && (
+                            <div className="text-center bg-bg-tertiary rounded-b-2xl p-4 border-t border-text-secondary/20"> {/* Changed to rounded-b-2xl for matchup-card integration */}
+                                <p className="font-semibold text-text-primary">
+                                    {hasPickedToday ?
+                                        `✅ You picked: ${userState.todaysPick.selectedTeam === 'home' ? todaysMatchup.homeTeam.name : todaysMatchup.awayTeam.name}` :
+                                        '🔒 Game has started!'
+                                    }
+                                </p>
+                                <p className="text-sm text-text-secondary mt-1">Come back tomorrow for a new matchup!</p>
+                                {/* Share Pick Button (Option B) */}
+                                {hasPickedToday && userState.currentStreak > 0 && (
+                                    <div className="mt-4 text-center">
+                                        <EnhancedButton
+                                            onClick={() => setShowShareModal(true)}
+                                            className="bg-green-600 hover:bg-green-700 text-white"
+                                        >
+                                            📱 Share This Pick
+                                        </EnhancedButton>
+                                    </div>
+                                )}
+
+                                {/* Add this inside the "hasPickedToday || gameStarted" section */}
+                                {gameStarted && !gameResult && (
+                                    <div className="mt-3">
+                                        <EnhancedButton
+                                            onClick={fetchAndDisplayResult}
+                                            loading={resultLoading}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                                        >
+                                            {resultLoading ? 'Checking...' : '🔍 Check Game Result'}
+                                        </EnhancedButton>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
 
                 {/* Leaderboard Preview Section */}
                 <div className="leaderboard-section mb-6">
@@ -3475,6 +3814,13 @@ const today = getUSEasternDate();
                         >
                             📱 Share
                         </EnhancedButton>
+                        {/* FEATURE 1: Pick History Page - History button */}
+                        <EnhancedButton  
+                            onClick={() => setShowPickHistory(true)}  
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                        >  
+                            📊 History
+                        </EnhancedButton>
                         <EnhancedButton
                             onClick={async () => {
                                 try {
@@ -3493,7 +3839,7 @@ const today = getUSEasternDate();
                                     window.location.reload();
                                 }
                             }}
-                            className="bg-red-600 hover:bg-red-700 text-white"
+                            className="bg-red-600 hover:bg-red-700 text-white col-span-2" // Make logout button span 2 columns
                             aria-label="Logout from Whop account"
                         >
                             🚪 Logout
@@ -3529,7 +3875,7 @@ const today = getUSEasternDate();
                 onClose={() => setShowPickConfirmationModal(false)}
                 onConfirm={confirmPick}
                 selectedTeam={teamToConfirm}
-                matchup={todaysMatchup}
+                matchup={todaysMatchup} // Pass the selected matchup
                 betAmount={betAmount}
                 userCoins={userState.coins}
             />
@@ -3553,7 +3899,7 @@ const today = getUSEasternDate();
                 isOpen={showShareModal}
                 onClose={() => setShowShareModal(false)}
                 userState={userState}
-                todaysMatchup={todaysMatchup}
+                todaysMatchup={todaysMatchup} // Pass the selected matchup
                 onShare={handleShareComplete}
                 addNotification={addNotification} // Pass addNotification to ShareModal
             />
@@ -3566,6 +3912,23 @@ const today = getUSEasternDate();
                 leaderboardData={leaderboardData}
                 onRefreshLeaderboard={refreshLeaderboard} // Use the new refresh function
                 userId={userId}
+            />
+
+            {/* FEATURE 1: Pick History Page - Modal */}
+            <PickHistoryModal
+                isOpen={showPickHistory}
+                onClose={() => setShowPickHistory(false)}
+                pickHistory={userState.pickHistoryData}
+                todaysMatchups={todaysMatchups} // Pass all matchups for potential lookup if needed
+            />
+
+            {/* FEATURE 2: Onboarding Tutorial - Modal */}
+            <TutorialModal
+                isOpen={showTutorial}
+                step={tutorialStep}
+                onNext={handleNextTutorialStep}
+                onClose={handleSkipTutorial}
+                totalSteps={TUTORIAL_TOTAL_STEPS}
             />
 
             {/* Floating Share Button */}
